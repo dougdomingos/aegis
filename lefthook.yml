@@ -1,0 +1,32 @@
+pre-commit:
+  parallel: true
+  commands:
+    # Format code and auto-stage changes if files were modified
+    gofmt:
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+
+    # Organize imports and format with goimports
+    goimports:
+      glob: "*.go"
+      run: goimports -w {staged_files}
+      stage_fixed: true
+
+    # Linting on staged files
+    golangci-lint:
+      glob: "*.go"
+      run: golangci-lint run --new-from-rev=HEAD~1 {staged_files}
+
+pre-push:
+  parallel: false
+  commands:
+    # Quick sanity check before pushing to remote
+    go-vet:
+      glob: "*.go"
+      run: go vet ./...
+
+    # Run short unit tests locally before pushing
+    go-test:
+      glob: "*.go"
+      run: go test -short ./...
