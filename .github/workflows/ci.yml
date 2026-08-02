@@ -1,0 +1,49 @@
+name: CI - Tests and Coverage
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Run Tests & Check Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run tests with coverage
+        run: |
+          go test -v -coverprofile=coverage.out ./...
+
+      - name: Verify Minimum Code Coverage (75%)
+        run: |
+          # Calculate total coverage percentage
+          COVERAGE=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
+
+          echo "Current Total Coverage: ${COVERAGE}%"
+
+          # Compare coverage against target threshold
+          REQUIRED_COVERAGE=75.0
+
+          IS_SUFFICIENT=$(awk -v cov="$COVERAGE" -v req="$REQUIRED_COVERAGE" 'BEGIN {print (cov >= req)}')
+
+          if [ "$IS_SUFFICIENT" -eq 1 ]; then
+            echo "SUCCESS: Coverage (${COVERAGE}%) meets or exceeds the threshold (${REQUIRED_COVERAGE}%)."
+          else
+            echo "ERROR: Coverage (${COVERAGE}%) is below the required minimum (${REQUIRED_COVERAGE}%)."
+            exit 1
+          fi
+
+      - name: Display Detailed Coverage Breakdown (Optional)
+        if: always()
+        run: go tool cover -func=coverage.out
