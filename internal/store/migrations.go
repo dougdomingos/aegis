@@ -76,16 +76,12 @@ func ApplyMigrations(db *sql.DB) error {
 		}
 
 		if _, err := tx.Exec(string(content)); err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				return fmt.Errorf("unable to execute migration %s: %w (rollback failed: %v)", version, err, rbErr)
-			}
+			_ = tx.Rollback()
 			return fmt.Errorf("unable to execute migration %s: %w", version, err)
 		}
 
 		if _, err := tx.Exec(QUERY_INSERT_NEW_MIGRATION, version); err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				return fmt.Errorf("failed to register status of migration %s: %w (rollback failed: %v)", version, err, rbErr)
-			}
+			_ = tx.Rollback()
 			return fmt.Errorf("failed to register status of migration %s: %w", version, err)
 		}
 
