@@ -2,8 +2,6 @@ package group
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // CreateGroupSchema declares the required fields for registering a new
@@ -31,7 +29,7 @@ type ChangeGroupNameSchema struct {
 
 // GroupOutputSchema declares the groups fields displayed to clients.
 type GroupOutputSchema struct {
-	ID        uuid.UUID
+	ID        int64
 	Name      string
 	CreatedAt time.Time
 }

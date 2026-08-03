@@ -3,8 +3,6 @@ package domain
 import (
 	"context"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Group represents a logical set of machines that belong to the same physical
@@ -12,7 +10,7 @@ import (
 type Group struct {
 
 	// ID is the unique identifier of the group, assigned at creation.
-	ID uuid.UUID
+	ID int64
 
 	// Name is a unique, human-friendly label to identify the group.
 	Name string

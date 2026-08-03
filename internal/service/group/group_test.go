@@ -22,7 +22,7 @@ func TestGroupService_CreateGroup_WithValidPayload_AcceptsCreation(t *testing.T)
 		t.Errorf("expected no error, got: %v", err)
 	}
 
-	if createdGroup.ID == [16]byte{} {
+	if createdGroup.ID == 0 {
 		t.Error("expected non-zero UUID for created group")
 	}
 

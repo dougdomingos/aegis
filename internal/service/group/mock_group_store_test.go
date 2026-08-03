@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"dougdomingos.com/aegis/internal/domain"
-	"github.com/google/uuid"
 )
 
 // MockGroupStore provides an in-memory implementation of domain.GroupStore
@@ -17,6 +16,7 @@ import (
 type MockGroupStore struct {
 	groups   map[string]*domain.Group
 	StoreErr error
+	nextID   int64
 }
 
 // NewMockGroupStore initializes a new MockGroupStore instance.
@@ -36,8 +36,9 @@ func (mock *MockGroupStore) Create(ctx context.Context, name string) (*domain.Gr
 		return nil, fmt.Errorf("group %s already exists", name)
 	}
 
+	mock.nextID++
 	group := &domain.Group{
-		ID:        uuid.New(),
+		ID:        mock.nextID,
 		Name:      name,
 		CreatedAt: time.Now(),
 	}
