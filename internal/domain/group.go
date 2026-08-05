@@ -26,6 +26,9 @@ type GroupStore interface {
 	// Create registers a new group into the database.
 	Create(ctx context.Context, name string) (*Group, error)
 
+	// GetByID retrieves the group whose ID matches the provided argument.
+	GetByID(ctx context.Context, id int64) (*Group, error)
+
 	// GetByName retrieves the group whose name matches the provided argument.
 	GetByName(ctx context.Context, name string) (*Group, error)
 
