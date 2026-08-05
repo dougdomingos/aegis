@@ -8,21 +8,21 @@ import (
 )
 
 const (
-	// QUERY_INIT_MIGRATION_TABLE creates the migration table in the database, if
+	// queryInitMigrationTable creates the migration table in the database, if
 	// it does not exist.
-	QUERY_INIT_MIGRATION_TABLE = `
+	queryInitMigrationTable = `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version TEXT PRIMARY KEY,
 			applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);
 	`
 
-	// QUERY_DOES_MIGRATION_EXISTS returns a boolean value, indicating whether
+	// queryDoesMigrationExists returns a boolean value, indicating whether
 	// the requested migration was processed or not.
-	QUERY_DOES_MIGRATION_EXISTS = "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)"
+	queryDoesMigrationExists = "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = ?)"
 
-	// QUERY_INSERT_NEW_MIGRATION creates a new entry for the provided migration.
-	QUERY_INSERT_NEW_MIGRATION = "INSERT INTO schema_migrations (version) VALUES (?)"
+	// queryInsertMigration creates a new entry for the provided migration.
+	queryInsertMigration = "INSERT INTO schema_migrations (version) VALUES (?)"
 )
 
 // MigrationsFS integrates the migration directory with the Go application,
@@ -39,7 +39,7 @@ var MigrationsFS embed.FS
 // and executes pending scripts sequentially within isolated database
 // transactions.
 func ApplyMigrations(db *sql.DB) error {
-	_, err := db.Exec(QUERY_INIT_MIGRATION_TABLE)
+	_, err := db.Exec(queryInitMigrationTable)
 	if err != nil {
 		return fmt.Errorf("failed to create schema_migrations table: %w", err)
 	}
@@ -57,7 +57,7 @@ func ApplyMigrations(db *sql.DB) error {
 		var doesEntryExists bool
 		version := entry.Name()
 
-		if err := db.QueryRow(QUERY_DOES_MIGRATION_EXISTS, version).Scan(&doesEntryExists); err != nil {
+		if err := db.QueryRow(queryDoesMigrationExists, version).Scan(&doesEntryExists); err != nil {
 			return fmt.Errorf("failed to verify status of migration %s: %w", version, err)
 		}
 
@@ -80,7 +80,7 @@ func ApplyMigrations(db *sql.DB) error {
 			return fmt.Errorf("unable to execute migration %s: %w", version, err)
 		}
 
-		if _, err := tx.Exec(QUERY_INSERT_NEW_MIGRATION, version); err != nil {
+		if _, err := tx.Exec(queryInsertMigration, version); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("failed to register status of migration %s: %w", version, err)
 		}
