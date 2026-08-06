@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 var (
