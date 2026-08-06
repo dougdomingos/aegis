@@ -107,14 +107,14 @@ func (mock *MockGroupStore) Update(ctx context.Context, group domain.Group) (*do
 }
 
 // List returns all stored groups or returns StoreErr if set.
-func (mock *MockGroupStore) List(ctx context.Context) ([]*domain.Group, error) {
+func (mock *MockGroupStore) List(ctx context.Context) ([]domain.Group, error) {
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}
 
-	list := make([]*domain.Group, 0, len(mock.groups))
+	list := make([]domain.Group, 0, len(mock.groups))
 	for _, group := range mock.groups {
-		list = append(list, group)
+		list = append(list, *group)
 	}
 
 	return list, nil

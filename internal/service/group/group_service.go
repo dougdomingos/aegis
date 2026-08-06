@@ -85,7 +85,7 @@ func (service *GroupService) GetGroupByName(ctx context.Context, payload GetGrou
 }
 
 // ListAllGroups returns all the existent groups within the database.
-func (service *GroupService) ListAllGroups(ctx context.Context) ([]*domain.Group, error) {
+func (service *GroupService) ListAllGroups(ctx context.Context) ([]domain.Group, error) {
 	groups, err := service.store.List(ctx)
 	if err != nil {
 		return nil, err

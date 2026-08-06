@@ -39,7 +39,7 @@ type GroupStore interface {
 	Update(ctx context.Context, group Group) (*Group, error)
 
 	// List retrieves all existent groups within the database.
-	List(ctx context.Context) ([]*Group, error)
+	List(ctx context.Context) ([]Group, error)
 
 	// Remove removes the group whose name matches the provided argument.
 	Remove(ctx context.Context, name string) error
