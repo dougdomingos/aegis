@@ -34,6 +34,8 @@ func InitDB(path string) (*sql.DB, error) {
 		db.SetConnMaxLifetime(1 * time.Hour)
 
 		err = db.Ping()
+
+		err = ApplyMigrations(db)
 	})
 
 	if err != nil {
