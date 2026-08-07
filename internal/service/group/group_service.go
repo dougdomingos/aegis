@@ -85,13 +85,18 @@ func (service *GroupService) GetGroupByName(ctx context.Context, payload GetGrou
 }
 
 // ListAllGroups returns all the existent groups within the database.
-func (service *GroupService) ListAllGroups(ctx context.Context) ([]domain.Group, error) {
+func (service *GroupService) ListAllGroups(ctx context.Context) ([]GroupOutputSchema, error) {
 	groups, err := service.store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	return groups, nil
+	output := make([]GroupOutputSchema, len(groups))
+	for i, g := range groups {
+		output[i] = *mapGroupToOutputSchema(&g)
+	}
+
+	return output, nil
 }
 
 func (service *GroupService) ChangeGroupName(ctx context.Context, payload ChangeGroupNameSchema) (*GroupOutputSchema, error) {
