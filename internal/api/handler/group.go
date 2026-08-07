@@ -1,29 +1,22 @@
 package handler
 
 import (
-	"database/sql"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"dougdomingos.com/aegis/internal/api/utils"
-
-	service "dougdomingos.com/aegis/internal/service/group"
-	store "dougdomingos.com/aegis/internal/store/group"
+	"dougdomingos.com/aegis/internal/service/group"
+	"github.com/go-chi/chi/v5"
 )
 
 // GroupHandler implements the methods that map HTTP requests into operations
 // within the application.
 type GroupHandler struct {
-	service *service.GroupService
+	service *group.GroupService
 }
 
 // NewGroupHandler creates a new GroupHandler instance.
-func NewGroupHandler(db *sql.DB) *GroupHandler {
-	groupStore := store.NewGroupStore(db)
-	groupService := service.NewGroupService(groupStore)
-
-	return &GroupHandler{service: groupService}
+func NewGroupHandler(s *group.GroupService) *GroupHandler {
+	return &GroupHandler{service: s}
 }
 
 func (handler *GroupHandler) RegisterGroupRoutes(r chi.Router) {
@@ -37,7 +30,7 @@ func (handler *GroupHandler) RegisterGroupRoutes(r chi.Router) {
 }
 
 func (handler *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var payload service.CreateGroupSchema
+	var payload group.CreateGroupSchema
 	if !utils.DecodePayload(w, r, &payload) {
 		return
 	}
@@ -45,8 +38,8 @@ func (handler *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	res, err := handler.service.CreateGroup(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			service.ErrNameRequired:      http.StatusBadRequest,
-			service.ErrNameAlreadyExists: http.StatusBadRequest,
+			group.ErrNameRequired:      http.StatusBadRequest,
+			group.ErrNameAlreadyExists: http.StatusBadRequest,
 		})
 
 		return
@@ -63,7 +56,7 @@ func (handler *GroupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if groups == nil {
-		groups = []service.GroupOutputSchema{}
+		groups = []group.GroupOutputSchema{}
 	}
 
 	utils.EncodeToJSON(w, http.StatusOK, groups)
@@ -72,14 +65,14 @@ func (handler *GroupHandler) List(w http.ResponseWriter, r *http.Request) {
 func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 
-	res, err := handler.service.GetGroupByName(r.Context(), service.GetGroupByNameSchema{Name: name})
+	res, err := handler.service.GetGroupByName(r.Context(), group.GetGroupByNameSchema{Name: name})
 	if err != nil {
 		utils.MapByError(w, err, nil)
 		return
 	}
 
 	if res == nil {
-		utils.EmitError(w, service.ErrGroupNotFound.Error(), http.StatusNotFound)
+		utils.EmitError(w, group.ErrGroupNotFound.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -87,7 +80,7 @@ func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	var payload service.ChangeGroupNameSchema
+	var payload group.ChangeGroupNameSchema
 	if !utils.DecodePayload(w, r, &payload) {
 		return
 	}
@@ -95,10 +88,10 @@ func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	res, err := handler.service.ChangeGroupName(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			service.ErrGroupNotFound:           http.StatusNotFound,
-			service.ErrTargetGroupNameRequired: http.StatusBadRequest,
-			service.ErrNewNameRequired:         http.StatusBadRequest,
-			service.ErrNameAlreadyExists:       http.StatusBadRequest,
+			group.ErrGroupNotFound:           http.StatusNotFound,
+			group.ErrTargetGroupNameRequired: http.StatusBadRequest,
+			group.ErrNewNameRequired:         http.StatusBadRequest,
+			group.ErrNameAlreadyExists:       http.StatusBadRequest,
 		})
 
 		return
@@ -108,13 +101,13 @@ func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *GroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	payload := service.RemoveGroup{Name: chi.URLParam(r, "name")}
+	payload := group.RemoveGroup{Name: chi.URLParam(r, "name")}
 
 	err := handler.service.RemoveGroup(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			service.ErrGroupNotFound: http.StatusNotFound,
-			service.ErrNameRequired:  http.StatusBadRequest,
+			group.ErrGroupNotFound: http.StatusNotFound,
+			group.ErrNameRequired:  http.StatusBadRequest,
 		})
 
 		return
