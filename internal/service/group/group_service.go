@@ -31,6 +31,16 @@ var (
 	ErrNewNameRequired = errors.New("must specify new name for group")
 )
 
+// GroupServiceInterface declares the methods provided by GroupService
+// implementations.
+type GroupServiceInterface interface {
+	CreateGroup(ctx context.Context, p CreateGroupSchema) (*GroupOutputSchema, error)
+	GetGroupByName(ctx context.Context, p GetGroupByNameSchema) (*GroupOutputSchema, error)
+	ListAllGroups(ctx context.Context) ([]GroupOutputSchema, error)
+	ChangeGroupName(ctx context.Context, p ChangeGroupNameSchema) (*GroupOutputSchema, error)
+	RemoveGroup(ctx context.Context, p RemoveGroup) error
+}
+
 // GroupService provides all operations needed to manage logical groups in the
 // system.
 type GroupService struct {

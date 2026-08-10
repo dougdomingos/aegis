@@ -11,11 +11,11 @@ import (
 // GroupHandler implements the methods that map HTTP requests into operations
 // within the application.
 type GroupHandler struct {
-	service *group.GroupService
+	service group.GroupServiceInterface
 }
 
 // NewGroupHandler creates a new GroupHandler instance.
-func NewGroupHandler(s *group.GroupService) *GroupHandler {
+func NewGroupHandler(s group.GroupServiceInterface) *GroupHandler {
 	return &GroupHandler{service: s}
 }
 
@@ -39,7 +39,7 @@ func (handler *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			group.ErrNameRequired:      http.StatusBadRequest,
-			group.ErrNameAlreadyExists: http.StatusBadRequest,
+			group.ErrNameAlreadyExists: http.StatusConflict,
 		})
 
 		return
@@ -67,7 +67,10 @@ func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 
 	res, err := handler.service.GetGroupByName(r.Context(), group.GetGroupByNameSchema{Name: name})
 	if err != nil {
-		utils.MapByError(w, err, nil)
+		utils.MapByError(w, err, map[error]int{
+			group.ErrNameRequired:  http.StatusBadRequest,
+			group.ErrGroupNotFound: http.StatusNotFound,
+		})
 		return
 	}
 
@@ -91,7 +94,7 @@ func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
 			group.ErrGroupNotFound:           http.StatusNotFound,
 			group.ErrTargetGroupNameRequired: http.StatusBadRequest,
 			group.ErrNewNameRequired:         http.StatusBadRequest,
-			group.ErrNameAlreadyExists:       http.StatusBadRequest,
+			group.ErrNameAlreadyExists:       http.StatusConflict,
 		})
 
 		return
