@@ -1,22 +1,16 @@
 pre-commit:
   parallel: true
   commands:
-    # Format code and auto-stage changes if files were modified
-    gofmt:
-      glob: "*.go"
-      run: gofmt -w {staged_files}
-      stage_fixed: true
-
-    # Organize imports and format with goimports
+    # Organize imports and format code in a single step
     goimports:
       glob: "*.go"
       run: goimports -w {staged_files}
       stage_fixed: true
 
-    # Linting on staged files
+    # Run linter over the entire code, only report errors introduced by new commit
     golangci-lint:
       glob: "*.go"
-      run: golangci-lint run --new-from-rev=HEAD~1 {staged_files}
+      run: golangci-lint run --new-from-rev=HEAD~1 ./...
 
 pre-push:
   parallel: false
