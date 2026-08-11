@@ -6,10 +6,9 @@ import (
 
 	"dougdomingos.com/aegis/internal/api/handler"
 	"dougdomingos.com/aegis/internal/api/middleware"
+	"dougdomingos.com/aegis/internal/service"
+	"dougdomingos.com/aegis/internal/store"
 	"github.com/go-chi/chi/v5"
-
-	service "dougdomingos.com/aegis/internal/service/group"
-	store "dougdomingos.com/aegis/internal/store/group"
 )
 
 func NewRouter(db *sql.DB) http.Handler {

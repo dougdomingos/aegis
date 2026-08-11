@@ -44,7 +44,7 @@ func ApplyMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create schema_migrations table: %w", err)
 	}
 
-	entries, err := MigrationsFS.ReadDir("migrations")
+	entries, err := MigrationsFS.ReadDir("sql")
 	if err != nil {
 		return fmt.Errorf("failed to read migrations directory: %w", err)
 	}
@@ -65,7 +65,7 @@ func ApplyMigrations(db *sql.DB) error {
 			continue
 		}
 
-		content, err := MigrationsFS.ReadFile("migrations/" + version)
+		content, err := MigrationsFS.ReadFile("sql/" + version)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", version, err)
 		}

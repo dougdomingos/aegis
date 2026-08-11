@@ -1,4 +1,4 @@
-package group_test
+package store_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"dougdomingos.com/aegis/internal/domain"
-	"dougdomingos.com/aegis/internal/store/group"
+	"dougdomingos.com/aegis/internal/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -277,7 +277,7 @@ func TestGroupStore_Remove_WithInexistentGroup_RejectsRemoval(t *testing.T) {
 
 // arrangeStoreTest sets up an in-memory SQLite database and provisions the
 // tables.
-func arrangeStoreTest(t *testing.T) (context.Context, *group.GroupStore, *sql.DB) {
+func arrangeStoreTest(t *testing.T) (context.Context, *store.GroupStore, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", ":memory:")
@@ -300,6 +300,6 @@ func arrangeStoreTest(t *testing.T) (context.Context, *group.GroupStore, *sql.DB
 		db.Close()
 	})
 
-	store := group.NewGroupStore(db)
+	store := store.NewGroupStore(db)
 	return context.Background(), store, db
 }

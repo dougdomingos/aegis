@@ -1,4 +1,4 @@
-package group_test
+package service_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	groupErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service/group"
+	"dougdomingos.com/aegis/internal/service"
 )
 
 // ============================================================================
@@ -343,12 +343,12 @@ func TestGroupService_RemoveGroup_WhenStoreFails_RejectsRemoval(t *testing.T) {
 // ============================================================================
 
 // arrangeTest initializes a new service instance with a mocked store provider.
-func arrangeTest(t *testing.T) (context.Context, *MockGroupStore, group.GroupService) {
+func arrangeTest(t *testing.T) (context.Context, *MockGroupStore, service.GroupService) {
 	t.Helper()
 
 	mockStore := NewMockGroupStore()
 	ctx := context.Background()
-	service := group.NewGroupService(mockStore)
+	service := service.NewGroupService(mockStore)
 
 	return ctx, mockStore, *service
 }

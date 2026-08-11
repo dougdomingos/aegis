@@ -6,18 +6,18 @@ import (
 	"dougdomingos.com/aegis/internal/api/utils"
 	"dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service/group"
+	"dougdomingos.com/aegis/internal/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // GroupHandler implements the methods that map HTTP requests into operations
 // within the application.
 type GroupHandler struct {
-	service group.GroupServiceInterface
+	service service.GroupServiceInterface
 }
 
 // NewGroupHandler creates a new GroupHandler instance.
-func NewGroupHandler(s group.GroupServiceInterface) *GroupHandler {
+func NewGroupHandler(s service.GroupServiceInterface) *GroupHandler {
 	return &GroupHandler{service: s}
 }
 

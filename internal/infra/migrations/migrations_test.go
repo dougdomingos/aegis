@@ -70,7 +70,7 @@ func TestRunMigrations_FileCountMatch(t *testing.T) {
 
 	}
 
-	entries, err := migrations.MigrationsFS.ReadDir("migrations")
+	entries, err := migrations.MigrationsFS.ReadDir("sql")
 	if err != nil {
 		t.Fatalf("failed to read embedded migrations directory: %v", err)
 	}

@@ -6,11 +6,11 @@ import (
 	"net/http"
 
 	"dougdomingos.com/aegis/internal/api"
-	"dougdomingos.com/aegis/internal/store"
+	"dougdomingos.com/aegis/internal/infra"
 )
 
 func main() {
-	db, err := store.InitDB("/tmp/aegis.db")
+	db, err := infra.InitDB("/tmp/aegis.db")
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
