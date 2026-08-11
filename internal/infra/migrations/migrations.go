@@ -1,4 +1,4 @@
-package store
+package migrations
 
 import (
 	"database/sql"
@@ -28,7 +28,7 @@ const (
 // MigrationsFS integrates the migration directory with the Go application,
 // allowing the SQL files to be embedded into the code seamlessly.
 //
-//go:embed "migrations/*.sql"
+//go:embed "sql/*.sql"
 var MigrationsFS embed.FS
 
 // ApplyMigrations executes all unapplied database migrations found in the

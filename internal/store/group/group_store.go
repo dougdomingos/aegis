@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"dougdomingos.com/aegis/internal/domain"
-	"dougdomingos.com/aegis/internal/store"
+	"dougdomingos.com/aegis/internal/infra/query"
 )
 
 const (
@@ -20,13 +20,13 @@ const (
 
 // GroupStore manages all database-related operations over groups.
 type GroupStore struct {
-	executor *store.QueryExecutor[domain.Group]
+	executor *query.QueryExecutor[domain.Group]
 }
 
 // NewGroupStore creates a new GroupStore instance.
 func NewGroupStore(db *sql.DB) *GroupStore {
 	return &GroupStore{
-		executor: store.NewQueryExecutor(db, mapRowToGroup),
+		executor: query.NewQueryExecutor(db, mapRowToGroup),
 	}
 }
 
@@ -119,7 +119,7 @@ func (store *GroupStore) Remove(ctx context.Context, name string) error {
 }
 
 // mapRowToGroup maps a scan function to a domain.Group struct.
-func mapRowToGroup(scan store.ScanFunc) (domain.Group, error) {
+func mapRowToGroup(scan query.ScanFunc) (domain.Group, error) {
 	var group domain.Group
 	if err := scan(&group.ID, &group.Name, &group.CreatedAt); err != nil {
 		return domain.Group{}, err

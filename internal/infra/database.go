@@ -1,4 +1,4 @@
-package store
+package infra
 
 import (
 	"database/sql"
@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"dougdomingos.com/aegis/internal/infra/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -35,7 +36,7 @@ func InitDB(path string) (*sql.DB, error) {
 
 		err = db.Ping()
 
-		err = ApplyMigrations(db)
+		err = migrations.ApplyMigrations(db)
 	})
 
 	if err != nil {

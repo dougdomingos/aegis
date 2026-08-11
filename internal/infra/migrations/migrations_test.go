@@ -1,4 +1,4 @@
-package store_test
+package migrations_test
 
 import (
 	"database/sql"
@@ -6,7 +6,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"dougdomingos.com/aegis/internal/store"
+	"dougdomingos.com/aegis/internal/infra/migrations"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 func TestMigrations_ApplyMigrations_Successful(t *testing.T) {
 	db := arrangeTest(t)
 
-	if err := store.ApplyMigrations(db); err != nil {
+	if err := migrations.ApplyMigrations(db); err != nil {
 		t.Fatalf("expected migrations to be applied flawlessly, got: %v", err)
 	}
 
@@ -40,7 +40,7 @@ func TestMigrations_ApplyMigrations_MultipleTimes_EnsuresIdempotency(t *testing.
 	var midCount, finalCount int
 	db := arrangeTest(t)
 
-	if err := store.ApplyMigrations(db); err != nil {
+	if err := migrations.ApplyMigrations(db); err != nil {
 		t.Fatalf("expected migrations to be applied flawlessly, got: %v", err)
 	}
 
@@ -48,7 +48,7 @@ func TestMigrations_ApplyMigrations_MultipleTimes_EnsuresIdempotency(t *testing.
 		t.Fatalf("expected schema_migrations to exist, got %v", err)
 	}
 
-	if err := store.ApplyMigrations(db); err != nil {
+	if err := migrations.ApplyMigrations(db); err != nil {
 		t.Fatalf("expected migrations to be applied flawlessly, got: %v", err)
 	}
 
@@ -65,12 +65,12 @@ func TestRunMigrations_FileCountMatch(t *testing.T) {
 	var expectedCount, appliedCount int
 	db := arrangeTest(t)
 
-	if err := store.ApplyMigrations(db); err != nil {
+	if err := migrations.ApplyMigrations(db); err != nil {
 		t.Fatalf("expected migrations to be applied flawlessly, got: %v", err)
 
 	}
 
-	entries, err := store.MigrationsFS.ReadDir("migrations")
+	entries, err := migrations.MigrationsFS.ReadDir("migrations")
 	if err != nil {
 		t.Fatalf("failed to read embedded migrations directory: %v", err)
 	}

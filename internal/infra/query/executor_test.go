@@ -1,4 +1,4 @@
-package store_test
+package query_test
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"dougdomingos.com/aegis/internal/store"
+	"dougdomingos.com/aegis/internal/infra/query"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,7 +72,7 @@ func TestQueryExecutor_QueryOne_WhenMapperFails_ReturnsError(t *testing.T) {
 	}
 
 	mapperErr := errors.New("mapper failure")
-	executor := store.NewQueryExecutor(db, func(scan store.ScanFunc) (TestEntity, error) {
+	executor := query.NewQueryExecutor(db, func(scan query.ScanFunc) (TestEntity, error) {
 		return TestEntity{}, mapperErr
 	})
 
@@ -145,7 +145,7 @@ func TestQueryExecutor_QueryMany_WhenMapperFails_ReturnsError(t *testing.T) {
 
 	callCount := 0
 	mapperErr := errors.New("mapper failure on second row")
-	executor := store.NewQueryExecutor(db, func(scan store.ScanFunc) (TestEntity, error) {
+	executor := query.NewQueryExecutor(db, func(scan query.ScanFunc) (TestEntity, error) {
 		callCount++
 		if callCount == 2 {
 			return TestEntity{}, mapperErr
@@ -263,7 +263,7 @@ func TestQueryExecutor_WithTx_WhenCallbackFails_RollsBackTransaction(t *testing.
 // Helper
 // ============================================================================
 
-func setupTestExecutor(t *testing.T) (context.Context, *sql.DB, *store.QueryExecutor[TestEntity]) {
+func setupTestExecutor(t *testing.T) (context.Context, *sql.DB, *query.QueryExecutor[TestEntity]) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", ":memory:")
@@ -285,11 +285,11 @@ func setupTestExecutor(t *testing.T) (context.Context, *sql.DB, *store.QueryExec
 		_ = db.Close()
 	})
 
-	executor := store.NewQueryExecutor(db, mapTestEntity)
+	executor := query.NewQueryExecutor(db, mapTestEntity)
 	return context.Background(), db, executor
 }
 
-func mapTestEntity(scan store.ScanFunc) (TestEntity, error) {
+func mapTestEntity(scan query.ScanFunc) (TestEntity, error) {
 	var item TestEntity
 	err := scan(&item.ID, &item.Name)
 	return item, err
