@@ -7,16 +7,17 @@ import (
 
 	"dougdomingos.com/aegis/internal/domain"
 	"dougdomingos.com/aegis/internal/errors"
+	"dougdomingos.com/aegis/internal/schemas"
 )
 
 // GroupServiceInterface declares the methods provided by GroupService
 // implementations.
 type GroupServiceInterface interface {
-	CreateGroup(ctx context.Context, p CreateGroupSchema) (*GroupOutputSchema, error)
-	GetGroupByName(ctx context.Context, p GetGroupByNameSchema) (*GroupOutputSchema, error)
-	ListAllGroups(ctx context.Context) ([]GroupOutputSchema, error)
-	ChangeGroupName(ctx context.Context, p ChangeGroupNameSchema) (*GroupOutputSchema, error)
-	RemoveGroup(ctx context.Context, p RemoveGroup) error
+	CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error)
+	GetGroupByName(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
+	ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error)
+	ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
+	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
 }
 
 // GroupService provides all operations needed to manage logical groups in the
@@ -35,7 +36,7 @@ func NewGroupService(store domain.GroupStore) *GroupService {
 
 // CreateGroup registers a new logical group into the system. The name provided to
 // this new group must be unique, otherwise the operation fails.
-func (service *GroupService) CreateGroup(ctx context.Context, payload CreateGroupSchema) (*GroupOutputSchema, error) {
+func (service *GroupService) CreateGroup(ctx context.Context, payload schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 	if strings.TrimSpace(payload.Name) == "" {
 		return nil, errors.ErrGroupNameRequired
 	}
@@ -59,7 +60,7 @@ func (service *GroupService) CreateGroup(ctx context.Context, payload CreateGrou
 
 // GetGroupByName retrieves a group by its name. If no group matches the
 // requested name, it returns nil.
-func (service *GroupService) GetGroupByName(ctx context.Context, payload GetGroupByNameSchema) (*GroupOutputSchema, error) {
+func (service *GroupService) GetGroupByName(ctx context.Context, payload schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error) {
 	if strings.TrimSpace(payload.Name) == "" {
 		return nil, errors.ErrGroupNameRequired
 	}
@@ -73,13 +74,13 @@ func (service *GroupService) GetGroupByName(ctx context.Context, payload GetGrou
 }
 
 // ListAllGroups returns all the existent groups within the database.
-func (service *GroupService) ListAllGroups(ctx context.Context) ([]GroupOutputSchema, error) {
+func (service *GroupService) ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error) {
 	groups, err := service.store.List(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	output := make([]GroupOutputSchema, len(groups))
+	output := make([]schemas.GroupOutputSchema, len(groups))
 	for i, g := range groups {
 		output[i] = *mapGroupToOutputSchema(&g)
 	}
@@ -87,7 +88,7 @@ func (service *GroupService) ListAllGroups(ctx context.Context) ([]GroupOutputSc
 	return output, nil
 }
 
-func (service *GroupService) ChangeGroupName(ctx context.Context, payload ChangeGroupNameSchema) (*GroupOutputSchema, error) {
+func (service *GroupService) ChangeGroupName(ctx context.Context, payload schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 	if strings.TrimSpace(payload.TargetGroupName) == "" {
 		return nil, errors.ErrGroupNameRequired
 	}
@@ -122,7 +123,7 @@ func (service *GroupService) ChangeGroupName(ctx context.Context, payload Change
 
 // RemoveGroup deletes a group from the database by its name. If no group
 // matches the requested name, it returns an error.
-func (service *GroupService) RemoveGroup(ctx context.Context, payload RemoveGroup) error {
+func (service *GroupService) RemoveGroup(ctx context.Context, payload schemas.RemoveGroupSchema) error {
 	if strings.TrimSpace(payload.Name) == "" {
 		return errors.ErrGroupNameRequired
 	}
@@ -146,12 +147,12 @@ func (service *GroupService) RemoveGroup(ctx context.Context, payload RemoveGrou
 // mapGroupToOutputSchema converts the Group entity format into the output
 // schema provided by this service. Returns nil if the provided group is
 // nil.
-func mapGroupToOutputSchema(group *domain.Group) *GroupOutputSchema {
+func mapGroupToOutputSchema(group *domain.Group) *schemas.GroupOutputSchema {
 	if group == nil {
 		return nil
 	}
 
-	return &GroupOutputSchema{
+	return &schemas.GroupOutputSchema{
 		ID:        group.ID,
 		Name:      group.Name,
 		CreatedAt: group.CreatedAt,

@@ -5,6 +5,7 @@ import (
 
 	"dougdomingos.com/aegis/internal/api/utils"
 	"dougdomingos.com/aegis/internal/errors"
+	"dougdomingos.com/aegis/internal/schemas"
 	"dougdomingos.com/aegis/internal/service/group"
 	"github.com/go-chi/chi/v5"
 )
@@ -31,7 +32,7 @@ func (handler *GroupHandler) RegisterGroupRoutes(r chi.Router) {
 }
 
 func (handler *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var payload group.CreateGroupSchema
+	var payload schemas.CreateGroupSchema
 	if !utils.DecodePayload(w, r, &payload) {
 		return
 	}
@@ -57,7 +58,7 @@ func (handler *GroupHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if groups == nil {
-		groups = []group.GroupOutputSchema{}
+		groups = []schemas.GroupOutputSchema{}
 	}
 
 	utils.EncodeToJSON(w, http.StatusOK, groups)
@@ -66,7 +67,7 @@ func (handler *GroupHandler) List(w http.ResponseWriter, r *http.Request) {
 func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 
-	res, err := handler.service.GetGroupByName(r.Context(), group.GetGroupByNameSchema{Name: name})
+	res, err := handler.service.GetGroupByName(r.Context(), schemas.GetGroupByNameSchema{Name: name})
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			errors.ErrGroupNameRequired: http.StatusBadRequest,
@@ -84,7 +85,7 @@ func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	var payload group.ChangeGroupNameSchema
+	var payload schemas.ChangeGroupNameSchema
 	if !utils.DecodePayload(w, r, &payload) {
 		return
 	}
@@ -105,7 +106,7 @@ func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *GroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	payload := group.RemoveGroup{Name: chi.URLParam(r, "name")}
+	payload := schemas.RemoveGroupSchema{Name: chi.URLParam(r, "name")}
 
 	err := handler.service.RemoveGroup(r.Context(), payload)
 	if err != nil {

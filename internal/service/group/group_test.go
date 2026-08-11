@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	groupErrors "dougdomingos.com/aegis/internal/errors"
+	"dougdomingos.com/aegis/internal/schemas"
 	"dougdomingos.com/aegis/internal/service/group"
 )
 
@@ -15,7 +16,7 @@ import (
 
 func TestGroupService_CreateGroup_WithValidPayload_AcceptsCreation(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.CreateGroupSchema{Name: "Test Group"}
+	payload := schemas.CreateGroupSchema{Name: "Test Group"}
 
 	createdGroup, err := service.CreateGroup(ctx, payload)
 
@@ -38,7 +39,7 @@ func TestGroupService_CreateGroup_WithValidPayload_AcceptsCreation(t *testing.T)
 
 func TestGroupService_CreateGroup_WithDuplicatedName_RejectsCreation(t *testing.T) {
 	ctx, store, service := arrangeTest(t)
-	payload := group.CreateGroupSchema{Name: "Test Group"}
+	payload := schemas.CreateGroupSchema{Name: "Test Group"}
 
 	_, err := store.Create(ctx, "Test Group")
 	if err != nil {
@@ -58,7 +59,7 @@ func TestGroupService_CreateGroup_WithDuplicatedName_RejectsCreation(t *testing.
 
 func TestGroupService_CreateGroup_WithEmptyName_RejectsCreation(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.CreateGroupSchema{Name: ""}
+	payload := schemas.CreateGroupSchema{Name: ""}
 
 	createdGroup, err := service.CreateGroup(ctx, payload)
 
@@ -76,7 +77,7 @@ func TestGroupService_CreateGroup_WhenStoreFails_RejectsCreation(t *testing.T) {
 	expectedErr := errors.New("failed to insert group into database")
 	store.StoreErr = expectedErr
 
-	payload := group.CreateGroupSchema{Name: "Test Group"}
+	payload := schemas.CreateGroupSchema{Name: "Test Group"}
 
 	if _, err := service.CreateGroup(ctx, payload); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)
@@ -89,7 +90,7 @@ func TestGroupService_CreateGroup_WhenStoreFails_RejectsCreation(t *testing.T) {
 
 func TestGroupService_GetGroupByName_WithSeededGroup_ReturnsGroup(t *testing.T) {
 	ctx, store, service := arrangeTest(t)
-	payload := group.GetGroupByNameSchema{Name: "Test Group"}
+	payload := schemas.GetGroupByNameSchema{Name: "Test Group"}
 
 	if _, err := store.Create(ctx, payload.Name); err != nil {
 		t.Fatalf("failed to seed group %q: %v", payload.Name, err)
@@ -110,7 +111,7 @@ func TestGroupService_GetGroupByName_WithSeededGroup_ReturnsGroup(t *testing.T) 
 
 func TestGroupService_GetGroupByName_WithInexistentGroup_ReturnsNil(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.GetGroupByNameSchema{Name: "Test Group"}
+	payload := schemas.GetGroupByNameSchema{Name: "Test Group"}
 
 	group, err := service.GetGroupByName(ctx, payload)
 
@@ -125,7 +126,7 @@ func TestGroupService_GetGroupByName_WithInexistentGroup_ReturnsNil(t *testing.T
 
 func TestGroupService_GetGroupByName_WithEmptyName_RejectsFetch(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.GetGroupByNameSchema{Name: ""}
+	payload := schemas.GetGroupByNameSchema{Name: ""}
 
 	queryResult, err := service.GetGroupByName(ctx, payload)
 
@@ -143,7 +144,7 @@ func TestGroupService_CreateGroup_WhenStoreFails_RejectsFetch(t *testing.T) {
 	expectedErr := errors.New("failed to query database for groups")
 	store.StoreErr = expectedErr
 
-	payload := group.CreateGroupSchema{Name: "Test Group"}
+	payload := schemas.CreateGroupSchema{Name: "Test Group"}
 
 	if _, err := service.CreateGroup(ctx, payload); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)
@@ -205,7 +206,7 @@ func TestGroupService_ListAllGroups_WhenStoreFails_RejectsFetch(t *testing.T) {
 
 func TestGroupService_ChangeGroupName_WithValidPayload_AcceptsNameChange(t *testing.T) {
 	ctx, store, service := arrangeTest(t)
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "Target Group", NewName: "Super Group"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "Target Group", NewName: "Super Group"}
 
 	if _, err := store.Create(ctx, payload.TargetGroupName); err != nil {
 		t.Fatalf("failed to seed group %q: %v", payload.TargetGroupName, err)
@@ -224,7 +225,7 @@ func TestGroupService_ChangeGroupName_WithValidPayload_AcceptsNameChange(t *test
 
 func TestGroupService_ChangeGroupName_WithEmptyTargetGroupName_RejectsChange(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "", NewName: "Super Group"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "", NewName: "Super Group"}
 
 	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNameRequired) {
 		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameRequired, err)
@@ -233,7 +234,7 @@ func TestGroupService_ChangeGroupName_WithEmptyTargetGroupName_RejectsChange(t *
 
 func TestGroupService_ChangeGroupName_WithEmptyNewName_RejectsChange(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: ""}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: ""}
 
 	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNewNameRequired) {
 		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNewNameRequired, err)
@@ -242,7 +243,7 @@ func TestGroupService_ChangeGroupName_WithEmptyNewName_RejectsChange(t *testing.
 
 func TestGroupService_ChangeGroupName_WithInexistentGroup_RejectsChange(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
 
 	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNotFound) {
 		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNotFound, err)
@@ -251,7 +252,7 @@ func TestGroupService_ChangeGroupName_WithInexistentGroup_RejectsChange(t *testi
 
 func TestGroupService_ChangeGroupName_WithDuplicatedNewName_RejectsChange(t *testing.T) {
 	ctx, store, service := arrangeTest(t)
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
 	mocked_groups := map[string]string{
 		"target":  payload.TargetGroupName,
 		"newName": payload.NewName,
@@ -273,7 +274,7 @@ func TestGroupService_ChangeGroupName_WhenStoreFails_RejectsChange(t *testing.T)
 	expectedErr := errors.New("failed to query database for requested grouṕ")
 	store.StoreErr = expectedErr
 
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
 
 	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)
@@ -286,7 +287,7 @@ func TestGroupService_ChangeGroupName_WhenStoreFails_RejectsChange(t *testing.T)
 
 func TestGroupService_RemoveGroup_WithExistentGroup_RemovesGroup(t *testing.T) {
 	ctx, store, service := arrangeTest(t)
-	payload := group.RemoveGroup{Name: "Test Group"}
+	payload := schemas.RemoveGroupSchema{Name: "Test Group"}
 
 	if _, err := store.Create(ctx, payload.Name); err != nil {
 		t.Fatalf("failed to seed group %q: %v", payload.Name, err)
@@ -305,7 +306,7 @@ func TestGroupService_RemoveGroup_WithExistentGroup_RemovesGroup(t *testing.T) {
 
 func TestGroupService_RemoveGroup_WithInexistentGroup_RejectsRemoval(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.RemoveGroup{Name: "Test Group"}
+	payload := schemas.RemoveGroupSchema{Name: "Test Group"}
 
 	err := service.RemoveGroup(ctx, payload)
 
@@ -316,7 +317,7 @@ func TestGroupService_RemoveGroup_WithInexistentGroup_RejectsRemoval(t *testing.
 
 func TestGroupService_RemoveGroup_WithEmptyName_RejectsRemoval(t *testing.T) {
 	ctx, _, service := arrangeTest(t)
-	payload := group.RemoveGroup{Name: ""}
+	payload := schemas.RemoveGroupSchema{Name: ""}
 
 	err := service.RemoveGroup(ctx, payload)
 
@@ -330,7 +331,7 @@ func TestGroupService_RemoveGroup_WhenStoreFails_RejectsRemoval(t *testing.T) {
 	expectedErr := errors.New("failed to query database for requested grouṕ")
 	store.StoreErr = expectedErr
 
-	payload := group.RemoveGroup{Name: "Test Group"}
+	payload := schemas.RemoveGroupSchema{Name: "Test Group"}
 
 	if err := service.RemoveGroup(ctx, payload); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)

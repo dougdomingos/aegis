@@ -14,6 +14,7 @@ import (
 
 	"dougdomingos.com/aegis/internal/api/handler"
 	groupErrors "dougdomingos.com/aegis/internal/errors"
+	"dougdomingos.com/aegis/internal/schemas"
 	"dougdomingos.com/aegis/internal/service/group"
 )
 
@@ -22,30 +23,30 @@ import (
 // ============================================================================
 
 type mockGroupService struct {
-	createFn    func(ctx context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error)
-	listFn      func(ctx context.Context) ([]group.GroupOutputSchema, error)
-	getByNameFn func(ctx context.Context, p group.GetGroupByNameSchema) (*group.GroupOutputSchema, error)
-	renameFn    func(ctx context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error)
-	removeFn    func(ctx context.Context, p group.RemoveGroup) error
+	createFn    func(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error)
+	listFn      func(ctx context.Context) ([]schemas.GroupOutputSchema, error)
+	getByNameFn func(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
+	renameFn    func(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
+	removeFn    func(ctx context.Context, p schemas.RemoveGroupSchema) error
 }
 
-func (m *mockGroupService) CreateGroup(ctx context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
+func (m *mockGroupService) CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 	return m.createFn(ctx, p)
 }
 
-func (m *mockGroupService) ListAllGroups(ctx context.Context) ([]group.GroupOutputSchema, error) {
+func (m *mockGroupService) ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error) {
 	return m.listFn(ctx)
 }
 
-func (m *mockGroupService) GetGroupByName(ctx context.Context, p group.GetGroupByNameSchema) (*group.GroupOutputSchema, error) {
+func (m *mockGroupService) GetGroupByName(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error) {
 	return m.getByNameFn(ctx, p)
 }
 
-func (m *mockGroupService) ChangeGroupName(ctx context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+func (m *mockGroupService) ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 	return m.renameFn(ctx, p)
 }
 
-func (m *mockGroupService) RemoveGroup(ctx context.Context, p group.RemoveGroup) error {
+func (m *mockGroupService) RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error {
 	return m.removeFn(ctx, p)
 }
 
@@ -54,10 +55,10 @@ func (m *mockGroupService) RemoveGroup(ctx context.Context, p group.RemoveGroup)
 // ============================================================================
 
 func TestGroupHandler_CreateGroup_WithValidPayload_ReturnsStatus201(t *testing.T) {
-	payload := group.CreateGroupSchema{Name: "lab1"}
+	payload := schemas.CreateGroupSchema{Name: "lab1"}
 	mock := &mockGroupService{
-		createFn: func(_ context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
-			return &group.GroupOutputSchema{Name: p.Name}, nil
+		createFn: func(_ context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
+			return &schemas.GroupOutputSchema{Name: p.Name}, nil
 		},
 	}
 
@@ -70,9 +71,9 @@ func TestGroupHandler_CreateGroup_WithValidPayload_ReturnsStatus201(t *testing.T
 }
 
 func TestGroupHandler_CreateGroup_WithEmptyName_ReturnsStatus400(t *testing.T) {
-	payload := group.CreateGroupSchema{Name: ""}
+	payload := schemas.CreateGroupSchema{Name: ""}
 	mock := &mockGroupService{
-		createFn: func(_ context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
+		createFn: func(_ context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNameRequired
 		},
 	}
@@ -86,9 +87,9 @@ func TestGroupHandler_CreateGroup_WithEmptyName_ReturnsStatus400(t *testing.T) {
 }
 
 func TestGroupHandler_CreateGroup_WithExistentName_ReturnsStatus409(t *testing.T) {
-	payload := group.CreateGroupSchema{Name: "lab1"}
+	payload := schemas.CreateGroupSchema{Name: "lab1"}
 	mock := &mockGroupService{
-		createFn: func(_ context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
+		createFn: func(_ context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNameAlreadyExists
 		},
 	}
@@ -103,7 +104,7 @@ func TestGroupHandler_CreateGroup_WithExistentName_ReturnsStatus409(t *testing.T
 
 func TestGroupHandler_CreateGroup_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
 	mock := &mockGroupService{
-		createFn: func(_ context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
+		createFn: func(_ context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, errors.New("malformed payload")
 		},
 	}
@@ -118,7 +119,7 @@ func TestGroupHandler_CreateGroup_WithMalformedPayload_ReturnsStatus400(t *testi
 
 func TestGroupHandler_CreateGroup_WithEmptyPayload_ReturnsStatus400(t *testing.T) {
 	mock := &mockGroupService{
-		createFn: func(_ context.Context, p group.CreateGroupSchema) (*group.GroupOutputSchema, error) {
+		createFn: func(_ context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, errors.New("empty payload")
 		},
 	}
@@ -138,8 +139,8 @@ func TestGroupHandler_CreateGroup_WithEmptyPayload_ReturnsStatus400(t *testing.T
 func TestGroupHandler_GetGroupByName_WithExistentGroup_ReturnsStatus200(t *testing.T) {
 	reqUrl := fmt.Sprintf("/groups/%s", "lab1")
 	mock := &mockGroupService{
-		getByNameFn: func(_ context.Context, p group.GetGroupByNameSchema) (*group.GroupOutputSchema, error) {
-			return &group.GroupOutputSchema{Name: p.Name}, nil
+		getByNameFn: func(_ context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error) {
+			return &schemas.GroupOutputSchema{Name: p.Name}, nil
 		},
 	}
 
@@ -154,7 +155,7 @@ func TestGroupHandler_GetGroupByName_WithExistentGroup_ReturnsStatus200(t *testi
 func TestGroupHandler_GetGroupByName_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
 	reqUrl := fmt.Sprintf("/groups/%s", "unknown")
 	mock := &mockGroupService{
-		getByNameFn: func(_ context.Context, p group.GetGroupByNameSchema) (*group.GroupOutputSchema, error) {
+		getByNameFn: func(_ context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNotFound
 		},
 	}
@@ -173,8 +174,8 @@ func TestGroupHandler_GetGroupByName_WithNonExistentGroup_ReturnsStatus404(t *te
 
 func TestGroupHandler_ListGroups_WithSeededGroups_ReturnsStatus200(t *testing.T) {
 	mock := &mockGroupService{
-		listFn: func(_ context.Context) ([]group.GroupOutputSchema, error) {
-			return []group.GroupOutputSchema{
+		listFn: func(_ context.Context) ([]schemas.GroupOutputSchema, error) {
+			return []schemas.GroupOutputSchema{
 					{ID: 1, Name: "lab1"},
 					{ID: 2, Name: "lab2"}},
 				nil
@@ -191,8 +192,8 @@ func TestGroupHandler_ListGroups_WithSeededGroups_ReturnsStatus200(t *testing.T)
 
 func TestGroupHandler_ListGroups_WithoutSeededGroups_ReturnsStatus200(t *testing.T) {
 	mock := &mockGroupService{
-		listFn: func(_ context.Context) ([]group.GroupOutputSchema, error) {
-			return []group.GroupOutputSchema{}, nil
+		listFn: func(_ context.Context) ([]schemas.GroupOutputSchema, error) {
+			return []schemas.GroupOutputSchema{}, nil
 		},
 	}
 
@@ -209,10 +210,10 @@ func TestGroupHandler_ListGroups_WithoutSeededGroups_ReturnsStatus200(t *testing
 // ============================================================================
 
 func TestGroupHandler_RenameGroup_WithValidPayload_ReturnsStatus200(t *testing.T) {
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "lab1", NewName: "new name"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "lab1", NewName: "new name"}
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
-			return &group.GroupOutputSchema{Name: "new name"}, nil
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
+			return &schemas.GroupOutputSchema{Name: "new name"}, nil
 		},
 	}
 
@@ -225,9 +226,9 @@ func TestGroupHandler_RenameGroup_WithValidPayload_ReturnsStatus200(t *testing.T
 }
 
 func TestGroupHandler_RenameGroup_WithoutTargetGroupName_ReturnsStatus400(t *testing.T) {
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "", NewName: "new name"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "", NewName: "new name"}
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNameRequired
 		},
 	}
@@ -241,9 +242,9 @@ func TestGroupHandler_RenameGroup_WithoutTargetGroupName_ReturnsStatus400(t *tes
 }
 
 func TestGroupHandler_RenameGroup_WithoutNewName_ReturnsStatus400(t *testing.T) {
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "lab1", NewName: ""}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "lab1", NewName: ""}
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNewNameRequired
 		},
 	}
@@ -257,9 +258,9 @@ func TestGroupHandler_RenameGroup_WithoutNewName_ReturnsStatus400(t *testing.T) 
 }
 
 func TestGroupHandler_RenameGroup_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "unknown", NewName: "new name"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "unknown", NewName: "new name"}
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNotFound
 		},
 	}
@@ -273,9 +274,9 @@ func TestGroupHandler_RenameGroup_WithNonExistentGroup_ReturnsStatus404(t *testi
 }
 
 func TestGroupHandler_RenameGroup_WithExistentName_ReturnsStatus409(t *testing.T) {
-	payload := group.ChangeGroupNameSchema{TargetGroupName: "unknown", NewName: "new name"}
+	payload := schemas.ChangeGroupNameSchema{TargetGroupName: "unknown", NewName: "new name"}
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, groupErrors.ErrGroupNameAlreadyExists
 		},
 	}
@@ -290,7 +291,7 @@ func TestGroupHandler_RenameGroup_WithExistentName_ReturnsStatus409(t *testing.T
 
 func TestGroupHandler_RenameGroup_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
 	mock := &mockGroupService{
-		renameFn: func(_ context.Context, p group.ChangeGroupNameSchema) (*group.GroupOutputSchema, error) {
+		renameFn: func(_ context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
 			return nil, errors.New("malformed payload")
 		},
 	}
@@ -310,7 +311,7 @@ func TestGroupHandler_RenameGroup_WithMalformedPayload_ReturnsStatus400(t *testi
 func TestGroupHandler_RemoveGroup_WithValidPayload_ReturnsStatus204(t *testing.T) {
 	reqUrl := fmt.Sprintf("/groups/%s", "lab1")
 	mock := &mockGroupService{
-		removeFn: func(_ context.Context, p group.RemoveGroup) error {
+		removeFn: func(_ context.Context, p schemas.RemoveGroupSchema) error {
 			return nil
 		},
 	}
@@ -326,7 +327,7 @@ func TestGroupHandler_RemoveGroup_WithValidPayload_ReturnsStatus204(t *testing.T
 func TestGroupHandler_RemoveGroup_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
 	reqUrl := fmt.Sprintf("/groups/%s", "unknown")
 	mock := &mockGroupService{
-		removeFn: func(_ context.Context, p group.RemoveGroup) error {
+		removeFn: func(_ context.Context, p schemas.RemoveGroupSchema) error {
 			return groupErrors.ErrGroupNotFound
 		},
 	}
