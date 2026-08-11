@@ -1,10 +1,29 @@
-.PHONY: init
+.PHONY: init test-coverage test-coverage-html lint fmt help
 
-init: ## Install utility tools for development lifecycle  
+init: ## Install utility tools for development lifecycle
 	go install github.com/evilmartians/lefthook@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	lefthook install
+
+test-coverage: ## Run all tests and compute coverage
+	go test -v -coverprofile=coverage.out \
+		./internal/{store,service} \
+		./internal/infra/{migrations,query} \
+		./internal/api/{handler,utils}
+
+	@go tool cover -func=coverage.out
+
+test-coverage-html: test-coverage ## Generate HTML coverage report
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+lint: ## Run linter
+	golangci-lint run ./...
+
+fmt: ## Format and organize imports
+	goimports -w .
+	go fmt ./...
 
 help: ## Show help for each make command
 	@echo 'Makefile commands:'
