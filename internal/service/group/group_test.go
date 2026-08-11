@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	groupErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/service/group"
 )
 
@@ -46,8 +47,8 @@ func TestGroupService_CreateGroup_WithDuplicatedName_RejectsCreation(t *testing.
 
 	createdGroup, err := service.CreateGroup(ctx, payload)
 
-	if !errors.Is(err, group.ErrNameAlreadyExists) {
-		t.Errorf("expected error %q, got %q", group.ErrNameAlreadyExists, err)
+	if !errors.Is(err, groupErrors.ErrGroupNameAlreadyExists) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameAlreadyExists, err)
 	}
 
 	if createdGroup != nil {
@@ -61,8 +62,8 @@ func TestGroupService_CreateGroup_WithEmptyName_RejectsCreation(t *testing.T) {
 
 	createdGroup, err := service.CreateGroup(ctx, payload)
 
-	if !errors.Is(err, group.ErrNameRequired) {
-		t.Errorf("expected error %q, got %q", group.ErrNameRequired, err)
+	if !errors.Is(err, groupErrors.ErrGroupNameRequired) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameRequired, err)
 	}
 
 	if createdGroup != nil {
@@ -128,8 +129,8 @@ func TestGroupService_GetGroupByName_WithEmptyName_RejectsFetch(t *testing.T) {
 
 	queryResult, err := service.GetGroupByName(ctx, payload)
 
-	if !errors.Is(err, group.ErrNameRequired) {
-		t.Errorf("expected error %q, got %q", group.ErrNameRequired, err)
+	if !errors.Is(err, groupErrors.ErrGroupNameRequired) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameRequired, err)
 	}
 
 	if queryResult != nil {
@@ -225,8 +226,8 @@ func TestGroupService_ChangeGroupName_WithEmptyTargetGroupName_RejectsChange(t *
 	ctx, _, service := arrangeTest(t)
 	payload := group.ChangeGroupNameSchema{TargetGroupName: "", NewName: "Super Group"}
 
-	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, group.ErrTargetGroupNameRequired) {
-		t.Errorf("expected error %q, got %q", group.ErrTargetGroupNameRequired, err)
+	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNameRequired) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameRequired, err)
 	}
 }
 
@@ -234,8 +235,8 @@ func TestGroupService_ChangeGroupName_WithEmptyNewName_RejectsChange(t *testing.
 	ctx, _, service := arrangeTest(t)
 	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: ""}
 
-	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, group.ErrNewNameRequired) {
-		t.Errorf("expected error %q, got %q", group.ErrNewNameRequired, err)
+	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNewNameRequired) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNewNameRequired, err)
 	}
 }
 
@@ -243,8 +244,8 @@ func TestGroupService_ChangeGroupName_WithInexistentGroup_RejectsChange(t *testi
 	ctx, _, service := arrangeTest(t)
 	payload := group.ChangeGroupNameSchema{TargetGroupName: "Test Group", NewName: "Super Group"}
 
-	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, group.ErrGroupNotFound) {
-		t.Errorf("expected error %q, got %q", group.ErrGroupNotFound, err)
+	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNotFound, err)
 	}
 }
 
@@ -262,8 +263,8 @@ func TestGroupService_ChangeGroupName_WithDuplicatedNewName_RejectsChange(t *tes
 		}
 	}
 
-	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, group.ErrNameAlreadyExists) {
-		t.Errorf("expected error %q, got %q", group.ErrNameAlreadyExists, err)
+	if _, err := service.ChangeGroupName(ctx, payload); !errors.Is(err, groupErrors.ErrGroupNameAlreadyExists) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameAlreadyExists, err)
 	}
 }
 
@@ -308,8 +309,8 @@ func TestGroupService_RemoveGroup_WithInexistentGroup_RejectsRemoval(t *testing.
 
 	err := service.RemoveGroup(ctx, payload)
 
-	if !errors.Is(err, group.ErrGroupNotFound) {
-		t.Errorf("expected error %q, got %q", group.ErrGroupNotFound, err)
+	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNotFound, err)
 	}
 }
 
@@ -319,8 +320,8 @@ func TestGroupService_RemoveGroup_WithEmptyName_RejectsRemoval(t *testing.T) {
 
 	err := service.RemoveGroup(ctx, payload)
 
-	if !errors.Is(err, group.ErrNameRequired) {
-		t.Errorf("expected error %q, got %q", group.ErrNameRequired, err)
+	if !errors.Is(err, groupErrors.ErrGroupNameRequired) {
+		t.Errorf("expected error %q, got %q", groupErrors.ErrGroupNameRequired, err)
 	}
 }
 

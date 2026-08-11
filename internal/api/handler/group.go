@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"dougdomingos.com/aegis/internal/api/utils"
+	"dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/service/group"
 	"github.com/go-chi/chi/v5"
 )
@@ -38,8 +39,8 @@ func (handler *GroupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	res, err := handler.service.CreateGroup(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			group.ErrNameRequired:      http.StatusBadRequest,
-			group.ErrNameAlreadyExists: http.StatusConflict,
+			errors.ErrGroupNameRequired:      http.StatusBadRequest,
+			errors.ErrGroupNameAlreadyExists: http.StatusConflict,
 		})
 
 		return
@@ -68,14 +69,14 @@ func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 	res, err := handler.service.GetGroupByName(r.Context(), group.GetGroupByNameSchema{Name: name})
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			group.ErrNameRequired:  http.StatusBadRequest,
-			group.ErrGroupNotFound: http.StatusNotFound,
+			errors.ErrGroupNameRequired: http.StatusBadRequest,
+			errors.ErrGroupNotFound:     http.StatusNotFound,
 		})
 		return
 	}
 
 	if res == nil {
-		utils.EmitError(w, group.ErrGroupNotFound.Error(), http.StatusNotFound)
+		utils.EmitError(w, errors.ErrGroupNotFound.Error(), http.StatusNotFound)
 		return
 	}
 
@@ -91,10 +92,10 @@ func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	res, err := handler.service.ChangeGroupName(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			group.ErrGroupNotFound:           http.StatusNotFound,
-			group.ErrTargetGroupNameRequired: http.StatusBadRequest,
-			group.ErrNewNameRequired:         http.StatusBadRequest,
-			group.ErrNameAlreadyExists:       http.StatusConflict,
+			errors.ErrGroupNotFound:          http.StatusNotFound,
+			errors.ErrGroupNameRequired:      http.StatusBadRequest,
+			errors.ErrGroupNewNameRequired:   http.StatusBadRequest,
+			errors.ErrGroupNameAlreadyExists: http.StatusConflict,
 		})
 
 		return
@@ -109,8 +110,8 @@ func (handler *GroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	err := handler.service.RemoveGroup(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			group.ErrGroupNotFound: http.StatusNotFound,
-			group.ErrNameRequired:  http.StatusBadRequest,
+			errors.ErrGroupNotFound:     http.StatusNotFound,
+			errors.ErrGroupNameRequired: http.StatusBadRequest,
 		})
 
 		return
