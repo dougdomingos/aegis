@@ -8,9 +8,12 @@ init: ## Install utility tools for development lifecycle
 
 test-coverage: ## Run all tests and compute coverage
 	go test -v -coverprofile=coverage.out \
-		./internal/{store,service} \
-		./internal/infra/{migrations,query} \
-		./internal/api/{handler,utils}
+		./internal/store \
+		./internal/service \
+		./internal/infra/migrations \
+		./internal/infra/query \
+		./internal/api/handler \
+		./internal/api/utils
 
 	@go tool cover -func=coverage.out
 
