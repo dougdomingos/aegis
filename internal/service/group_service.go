@@ -116,7 +116,9 @@ func (service *GroupService) ChangeGroupName(ctx context.Context, payload schema
 	}
 
 	group.Name = payload.NewName
-	service.store.Update(ctx, *group)
+	if _, err := service.store.Update(ctx, *group); err != nil {
+		return nil, err
+	}
 
 	return mapGroupToOutputSchema(group), nil
 }
