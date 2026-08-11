@@ -22,8 +22,7 @@ jobs:
           cache: true
 
       - name: Run tests with coverage
-        run: |
-          go test -v -coverprofile=coverage.out ./...
+        run: make test-coverage
 
       - name: Verify Minimum Code Coverage (75%)
         run: |
