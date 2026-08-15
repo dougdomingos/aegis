@@ -39,7 +39,6 @@ func TestRuleStore_Create_WithValidData_CreatesRule(t *testing.T) {
 
 	for testName, tt := range rules {
 		t.Run(testName, func(t *testing.T) {
-			t.Logf("Creating rule: %+v", tt)
 			rule, err := store.Create(ctx, tt)
 
 			if err != nil {
@@ -210,7 +209,7 @@ func TestRuleStore_List_WithTypeFilter_ReturnsMatchingRules(t *testing.T) {
 			}
 
 			for _, rule := range rules {
-				if rule.Type != *filter.Type {
+				if !filter.Matches(rule) {
 					t.Fatalf("expected result to only have rules of type %q, found %q", *filter.Type, rule.Type)
 				}
 			}
@@ -252,7 +251,7 @@ func TestRuleStore_List_WithActionFilter_ReturnsMatchingRules(t *testing.T) {
 			}
 
 			for _, rule := range rules {
-				if rule.Action != *filter.Action {
+				if !filter.Matches(rule) {
 					t.Fatalf("expected result to only have rules with %q action, found %q", *filter.Action, rule.Action)
 				}
 			}
@@ -296,7 +295,7 @@ func TestRuleStore_List_WithValueFilter_ReturnsMatchingRules(t *testing.T) {
 			}
 
 			for _, rule := range rules {
-				if !strings.Contains(rule.Value, *filter.Value) {
+				if !filter.Matches(rule) {
 					t.Fatalf("expected result to only have rules containing %q, found %q", *filter.Value, rule.Value)
 				}
 			}
