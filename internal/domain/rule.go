@@ -53,6 +53,35 @@ type Rule struct {
 	CreatedAt time.Time
 }
 
+// RulePatch contains the fields that can be updated in a Rule. Only non-nil
+// fields will be applied.
+type RulePatch struct {
+	Value    *string
+	Action   *RuleAction
+	Protocol *string
+	Port     *int
+}
+
+// Patch applies a partial update to the Rule, modifying only the non-nil
+// fields of the provided RulePatch.
+func (r *Rule) Patch(patch RulePatch) {
+	if patch.Value != nil {
+		r.Value = *patch.Value
+	}
+
+	if patch.Action != nil {
+		r.Action = *patch.Action
+	}
+
+	if patch.Protocol != nil {
+		r.Protocol = patch.Protocol
+	}
+
+	if patch.Port != nil {
+		r.Port = patch.Port
+	}
+}
+
 // IsEqual checks whether the provided rule instance has the same values as the
 // caller.
 func (r *Rule) IsEqual(rule *Rule) bool {
