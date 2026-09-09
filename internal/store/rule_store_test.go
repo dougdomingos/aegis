@@ -488,24 +488,7 @@ func seedRule(t *testing.T, ctx context.Context, store *store.RuleStore, rule do
 func assertRuleEqual(t *testing.T, expected, actual *domain.Rule) {
 	t.Helper()
 
-	if expected.Type != actual.Type {
-		t.Errorf("type mismatch: expected %q, got %q", expected.Type, actual.Type)
-	}
-	if expected.Value != actual.Value {
-		t.Errorf("value mismatch: expected %q, got %q", expected.Value, actual.Value)
-	}
-	if expected.Action != actual.Action {
-		t.Errorf("action mismatch: expected %q, got %q", expected.Action, actual.Action)
-	}
-	if (expected.Protocol == nil) != (actual.Protocol == nil) {
-		t.Errorf("protocol nil mismatch: expected %v, got %v", expected.Protocol == nil, actual.Protocol == nil)
-	} else if expected.Protocol != nil && *expected.Protocol != *actual.Protocol {
-		t.Errorf("expected protocol %q, got %q", *expected.Protocol, *actual.Protocol)
-	}
-
-	if (expected.Port == nil) != (actual.Port == nil) {
-		t.Errorf("port nil mismatch: expected %v, got %v", expected.Port == nil, actual.Port == nil)
-	} else if expected.Port != nil && *expected.Port != *actual.Port {
-		t.Errorf("expected port %d, got %d", *expected.Port, *actual.Port)
+	if !expected.IsEqual(actual) {
+		t.Errorf("rules do not match: expected %+v, got %+v", expected, actual)
 	}
 }

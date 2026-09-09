@@ -53,6 +53,22 @@ type Rule struct {
 	CreatedAt time.Time
 }
 
+// IsEqual checks whether the provided rule instance has the same values as the
+// caller.
+func (r *Rule) IsEqual(rule *Rule) bool {
+	if r.Type != rule.Type || r.Value != rule.Value || r.Action != rule.Action {
+		return false
+	} else if (r.Protocol == nil) != (rule.Protocol == nil) || (r.Port == nil) != (rule.Port == nil) {
+		return false
+	} else if r.Protocol != nil && *r.Protocol != *rule.Protocol {
+		return false
+	} else if r.Port != nil && *r.Port != *rule.Port {
+		return false
+	}
+
+	return true
+}
+
 // RuleStore declares the required operations that any storage service must
 // implement to manage rule persistence.
 type RuleStore interface {
