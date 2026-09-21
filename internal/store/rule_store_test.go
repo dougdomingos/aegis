@@ -188,14 +188,14 @@ func TestRuleStore_List_WithTypeFilter_ReturnsMatchingRules(t *testing.T) {
 	}
 
 	testCases := map[string]domain.RuleFilter{
-		"Domain type": domain.NewRuleFilter().WithRuleType(domain.DomainRuleType).Build(),
-		"IP type":     domain.NewRuleFilter().WithRuleType(domain.IPRuleType).Build(),
+		"Domain type": domain.NewRuleFilter().WithRuleType(new(domain.DomainRuleType)).Build(),
+		"IP type":     domain.NewRuleFilter().WithRuleType(new(domain.IPRuleType)).Build(),
 	}
 
 	for name, tt := range testCases {
 		t.Run(name, func(t *testing.T) {
 			filter := domain.NewRuleFilter().
-				WithRuleType(*tt.Type).
+				WithRuleType(tt.Type).
 				Build()
 
 			rules, err := store.List(ctx, filter)
@@ -230,14 +230,14 @@ func TestRuleStore_List_WithActionFilter_ReturnsMatchingRules(t *testing.T) {
 	}
 
 	testCases := map[string]domain.RuleFilter{
-		"Allow action": domain.NewRuleFilter().WithAction(domain.AllowAction).Build(),
-		"Deny action":  domain.NewRuleFilter().WithAction(domain.DenyAction).Build(),
+		"Allow action": domain.NewRuleFilter().WithAction(new(domain.AllowAction)).Build(),
+		"Deny action":  domain.NewRuleFilter().WithAction(new(domain.DenyAction)).Build(),
 	}
 
 	for name, tt := range testCases {
 		t.Run(name, func(t *testing.T) {
 			filter := domain.NewRuleFilter().
-				WithAction(*tt.Action).
+				WithAction(tt.Action).
 				Build()
 
 			rules, err := store.List(ctx, filter)
@@ -274,14 +274,14 @@ func TestRuleStore_List_WithValueFilter_ReturnsMatchingRules(t *testing.T) {
 	}
 
 	testCases := map[string]domain.RuleFilter{
-		"Domain rules": domain.NewRuleFilter().WithValue(".com").Build(),
-		"IP rules":     domain.NewRuleFilter().WithValue("0.0.1").Build(),
+		"Domain rules": domain.NewRuleFilter().WithValue(new(".com")).Build(),
+		"IP rules":     domain.NewRuleFilter().WithValue(new("0.0.1")).Build(),
 	}
 
 	for name, tt := range testCases {
 		t.Run(name, func(t *testing.T) {
 			filter := domain.NewRuleFilter().
-				WithValue(*tt.Value).
+				WithValue(tt.Value).
 				Build()
 
 			rules, err := store.List(ctx, filter)
@@ -307,8 +307,8 @@ func TestRuleStore_List_WithNoMatchingFilter_ReturnsEmpty(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
 
 	filter := domain.NewRuleFilter().
-		WithRuleType(domain.IPRuleType).
-		WithValue(".com").
+		WithRuleType(new(domain.IPRuleType)).
+		WithValue(new(".com")).
 		Build()
 
 	rulesToSeed := []domain.Rule{
