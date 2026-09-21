@@ -20,5 +20,10 @@ func NewRouter(db *sql.DB) http.Handler {
 	groups := handler.NewGroupHandler(groupService)
 	groups.RegisterGroupRoutes(router)
 
+	ruleStore := store.NewRuleStore(db)
+	ruleService := service.NewRuleService(ruleStore)
+	rules := handler.NewRuleHandler(ruleService)
+	rules.RegisterRuleRoutes(router)
+
 	return router
 }
