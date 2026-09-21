@@ -2,7 +2,12 @@ package domain
 
 import (
 	"context"
+	"net"
+	"regexp"
+	"strings"
 	"time"
+
+	"dougdomingos.com/aegis/internal/errors"
 )
 
 // RuleType represents the rule classification type.
@@ -24,6 +29,9 @@ const (
 	// DenyAction blocks matching network traffic.
 	DenyAction RuleAction = "DENY"
 )
+
+// domainRegex
+var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 
 // Rule represents a network rule to be enforced by the system.
 type Rule struct {
@@ -96,6 +104,44 @@ func (r *Rule) IsEqual(rule *Rule) bool {
 	}
 
 	return true
+}
+
+func (r *Rule) Validate() error {
+	if strings.TrimSpace(string(r.Type)) == "" {
+		return errors.ErrRuleTypeRequired
+	}
+
+	if strings.TrimSpace(string(r.Action)) == "" {
+		return errors.ErrRuleActionRequired
+	}
+
+	if strings.TrimSpace(r.Value) == "" {
+		return errors.ErrRuleValueRequired
+	}
+
+	switch r.Type {
+	case DomainRuleType:
+		if r.Protocol != nil || r.Port != nil {
+			return errors.ErrInvalidFieldForRuleType
+		}
+
+		if !domainRegex.MatchString(r.Value) {
+			return errors.ErrMalformedRuleValue
+		}
+
+	case IPRuleType:
+		if net.ParseIP(r.Value) == nil {
+			return errors.ErrMalformedRuleValue
+		}
+
+		if r.Port != nil {
+			if *r.Port < 0 || *r.Port > 65535 {
+				return errors.ErrInvalidRulePortValue
+			}
+		}
+	}
+
+	return nil
 }
 
 // RuleStore declares the required operations that any storage service must
