@@ -1,32 +1,30 @@
-.PHONY: init test-coverage test-coverage-html lint fmt help
+.PHONY: init tests coverage test-report help
+
+# TEST_PACKAGES declares which packages should be executed for tests, keeping
+# untested packages out of the coverage profile.
+TEST_PACKAGES = ./internal/store \
+	./internal/service \
+	./internal/infra/migrations \
+	./internal/infra/query \
+	./internal/api/handler \
+	./internal/api/utils
 
 init: ## Install utility tools for development lifecycle
 	go install github.com/evilmartians/lefthook@latest
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install github.com/dougdomingos/test-prettify@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	lefthook install
 
-test-coverage: ## Run all tests and compute coverage
-	go test -v -coverprofile=coverage.out \
-		./internal/store \
-		./internal/service \
-		./internal/infra/migrations \
-		./internal/infra/query \
-		./internal/api/handler \
-		./internal/api/utils
+tests: ## Run all tests and report errors only
+	@go test -short $(TEST_PACKAGES)
 
+coverage: ## Run all tests and compute coverage
+	@go test -v -coverprofile=coverage.out $(TEST_PACKAGES)
 	@go tool cover -func=coverage.out
 
-test-coverage-html: test-coverage ## Generate HTML coverage report
-	@go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
-
-lint: ## Run linter
-	golangci-lint run ./...
-
-fmt: ## Format and organize imports
-	goimports -w .
-	go fmt ./...
+test-report: ## Run all tests and yield report as HTML
+	@go test -v -json -coverprofile=coverage.out $(TEST_PACKAGES) | test-prettify --cov-prof coverage.out
 
 help: ## Show help for each make command
 	@echo 'Makefile commands:'
