@@ -15,7 +15,6 @@ import (
 	"dougdomingos.com/aegis/internal/api/handler"
 	groupErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service"
 )
 
 // ============================================================================
@@ -344,7 +343,7 @@ func TestGroupHandler_RemoveGroup_WithNonExistentGroup_ReturnsStatus404(t *testi
 // Helpers
 // ============================================================================
 
-func setupRouter(t *testing.T, svc service.GroupServiceInterface) *chi.Mux {
+func setupRouter(t *testing.T, svc handler.GroupServiceInterface) *chi.Mux {
 	t.Helper()
 
 	r := chi.NewRouter()

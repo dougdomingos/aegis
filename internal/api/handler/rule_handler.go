@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -8,18 +9,27 @@ import (
 	"dougdomingos.com/aegis/internal/domain"
 	"dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service"
 	"github.com/go-chi/chi/v5"
 )
+
+// RuleServiceInterface declares the methods provided by RuleService
+// implementations.
+type RuleServiceInterface interface {
+	CreateRule(ctx context.Context, p schemas.CreateRuleSchema) (*schemas.RuleOutputSchema, error)
+	GetRuleByID(ctx context.Context, p schemas.GetRuleByIDSchema) (*schemas.RuleOutputSchema, error)
+	ListRules(ctx context.Context, p schemas.ListRulesSchema) ([]schemas.RuleOutputSchema, error)
+	UpdateRule(ctx context.Context, p schemas.UpdateRuleSchema) (*schemas.RuleOutputSchema, error)
+	RemoveRule(ctx context.Context, p schemas.RemoveRuleSchema) error
+}
 
 // RuleHandler implements the methods that map HTTP requests into operations
 // within the application.
 type RuleHandler struct {
-	service service.RuleServiceInterface
+	service RuleServiceInterface
 }
 
 // NewRuleHandler creates a new RuleHandler instance.
-func NewRuleHandler(s service.RuleServiceInterface) *RuleHandler {
+func NewRuleHandler(s RuleServiceInterface) *RuleHandler {
 	return &RuleHandler{service: s}
 }
 

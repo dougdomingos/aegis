@@ -10,16 +10,6 @@ import (
 	"dougdomingos.com/aegis/internal/schemas"
 )
 
-// GroupServiceInterface declares the methods provided by GroupService
-// implementations.
-type GroupServiceInterface interface {
-	CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error)
-	GetGroupByName(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
-	ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error)
-	ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
-	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
-}
-
 // GroupService provides all operations needed to manage logical groups in the
 // system.
 type GroupService struct {

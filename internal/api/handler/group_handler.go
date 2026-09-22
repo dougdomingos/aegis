@@ -1,23 +1,33 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"dougdomingos.com/aegis/internal/api/utils"
 	"dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service"
 	"github.com/go-chi/chi/v5"
 )
+
+// GroupServiceInterface declares the methods provided by GroupService
+// implementations.
+type GroupServiceInterface interface {
+	CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error)
+	GetGroupByName(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
+	ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error)
+	ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
+	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
+}
 
 // GroupHandler implements the methods that map HTTP requests into operations
 // within the application.
 type GroupHandler struct {
-	service service.GroupServiceInterface
+	service GroupServiceInterface
 }
 
 // NewGroupHandler creates a new GroupHandler instance.
-func NewGroupHandler(s service.GroupServiceInterface) *GroupHandler {
+func NewGroupHandler(s GroupServiceInterface) *GroupHandler {
 	return &GroupHandler{service: s}
 }
 

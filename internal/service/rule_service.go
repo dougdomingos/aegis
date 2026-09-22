@@ -9,16 +9,6 @@ import (
 	"dougdomingos.com/aegis/internal/schemas"
 )
 
-// RuleServiceInterface declares the methods provided by RuleService
-// implementations.
-type RuleServiceInterface interface {
-	CreateRule(ctx context.Context, p schemas.CreateRuleSchema) (*schemas.RuleOutputSchema, error)
-	GetRuleByID(ctx context.Context, p schemas.GetRuleByIDSchema) (*schemas.RuleOutputSchema, error)
-	ListRules(ctx context.Context, p schemas.ListRulesSchema) ([]schemas.RuleOutputSchema, error)
-	UpdateRule(ctx context.Context, p schemas.UpdateRuleSchema) (*schemas.RuleOutputSchema, error)
-	RemoveRule(ctx context.Context, p schemas.RemoveRuleSchema) error
-}
-
 // RuleService provides all operations needed to manage rules in the system.
 type RuleService struct {
 

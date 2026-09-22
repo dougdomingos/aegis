@@ -12,7 +12,6 @@ import (
 	"dougdomingos.com/aegis/internal/domain"
 	ruleErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
-	"dougdomingos.com/aegis/internal/service"
 )
 
 // ============================================================================
@@ -458,7 +457,7 @@ func TestRuleHandler_Delete_WithInvalidID_ReturnsStatus400(t *testing.T) {
 // Helpers
 // ============================================================================
 
-func setupRuleRouter(svc service.RuleServiceInterface) *chi.Mux {
+func setupRuleRouter(svc handler.RuleServiceInterface) *chi.Mux {
 	r := chi.NewRouter()
 	h := handler.NewRuleHandler(svc)
 	h.RegisterRuleRoutes(r)
