@@ -33,7 +33,7 @@ jobs:
           cache: true
 
       - name: Run tests with coverage
-        run: make test-coverage
+        run: make coverage
 
       - name: Verify Minimum Code Coverage (75%)
         run: |
