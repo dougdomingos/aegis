@@ -1,0 +1,28 @@
+info:
+  name: 04 - Rename Group Not Found
+  type: http
+  seq: 4
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/groups/rename"
+  body:
+    type: json
+    data: |-
+      {
+        "TargetGroupName": "unknown",
+        "NewName": "lab-one"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "404"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

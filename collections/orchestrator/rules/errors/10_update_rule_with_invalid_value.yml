@@ -1,0 +1,27 @@
+info:
+  name: 10 - Update Rule with Invalid Value
+  type: http
+  seq: 10
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/rules/1"
+  body:
+    type: json
+    data: |-
+      {
+        "value": "thisisnotadomain"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "400"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

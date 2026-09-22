@@ -1,0 +1,29 @@
+info:
+  name: 01 - Create Rule with Empty Type
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/rules"
+  body:
+    type: json
+    data: |-
+      {
+        "rule_type": "",
+        "action": "ALLOW",
+        "value": "test.com"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "400"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

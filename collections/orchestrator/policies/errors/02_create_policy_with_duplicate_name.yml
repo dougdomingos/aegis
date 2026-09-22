@@ -1,0 +1,27 @@
+info:
+  name: 02 - Create Policy With Duplicate Name
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/policies"
+  body:
+    type: json
+    data: |-
+      {
+        "name": "Test Policy"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "409"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

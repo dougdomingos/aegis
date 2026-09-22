@@ -1,0 +1,31 @@
+info:
+  name: 02 - Create IP Rule
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/rules"
+  body:
+    type: json
+    data: |-
+      {
+        "rule_type": "IP",
+        "action": "DENY",
+        "value": "10.0.0.1",
+        "protocol": "TCP",
+        "port": 443
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

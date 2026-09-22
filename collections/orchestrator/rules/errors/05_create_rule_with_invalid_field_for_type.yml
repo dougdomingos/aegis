@@ -1,0 +1,30 @@
+info:
+  name: 05 - Create Rule with Invalid Field for Type
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: "{{baseUrl}}/rules"
+  body:
+    type: json
+    data: |-
+      {
+        "rule_type": "DOMAIN",
+        "action": "ALLOW",
+        "value": "test.com",
+        "port": 443
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "400"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

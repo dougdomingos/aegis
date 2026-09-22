@@ -1,0 +1,30 @@
+info:
+  name: 06 - Create Rule with Invalid Port
+  type: http
+  seq: 6
+
+http:
+  method: POST
+  url: "{{baseUrl}}/rules"
+  body:
+    type: json
+    data: |-
+      {
+        "rule_type": "IP",
+        "action": "ALLOW",
+        "value": "10.0.0.1",
+        "port": 70000
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "400"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

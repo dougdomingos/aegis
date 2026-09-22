@@ -1,0 +1,29 @@
+info:
+  name: 04 - Create Rule with Malformed Value
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/rules"
+  body:
+    type: json
+    data: |-
+      {
+        "rule_type": "DOMAIN",
+        "action": "ALLOW",
+        "value": "thisisnotadomain"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "400"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

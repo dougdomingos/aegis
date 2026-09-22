@@ -1,0 +1,28 @@
+info:
+  name: 05 - Rename Group to Duplicate Name
+  type: http
+  seq: 5
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/groups/rename"
+  body:
+    type: json
+    data: |-
+      {
+        "TargetGroupName": "lab1",
+        "NewName": "lab2"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "409"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
