@@ -15,38 +15,6 @@ import (
 )
 
 // ============================================================================
-// Service mock
-// ============================================================================
-
-type mockRuleService struct {
-	createFn  func(ctx context.Context, p schemas.CreateRuleSchema) (*schemas.RuleOutputSchema, error)
-	getByIDFn func(ctx context.Context, p schemas.GetRuleByIDSchema) (*schemas.RuleOutputSchema, error)
-	listFn    func(ctx context.Context, p schemas.ListRulesSchema) ([]schemas.RuleOutputSchema, error)
-	updateFn  func(ctx context.Context, p schemas.UpdateRuleSchema) (*schemas.RuleOutputSchema, error)
-	removeFn  func(ctx context.Context, p schemas.RemoveRuleSchema) error
-}
-
-func (m *mockRuleService) CreateRule(ctx context.Context, p schemas.CreateRuleSchema) (*schemas.RuleOutputSchema, error) {
-	return m.createFn(ctx, p)
-}
-
-func (m *mockRuleService) GetRuleByID(ctx context.Context, p schemas.GetRuleByIDSchema) (*schemas.RuleOutputSchema, error) {
-	return m.getByIDFn(ctx, p)
-}
-
-func (m *mockRuleService) ListRules(ctx context.Context, p schemas.ListRulesSchema) ([]schemas.RuleOutputSchema, error) {
-	return m.listFn(ctx, p)
-}
-
-func (m *mockRuleService) UpdateRule(ctx context.Context, p schemas.UpdateRuleSchema) (*schemas.RuleOutputSchema, error) {
-	return m.updateFn(ctx, p)
-}
-
-func (m *mockRuleService) RemoveRule(ctx context.Context, p schemas.RemoveRuleSchema) error {
-	return m.removeFn(ctx, p)
-}
-
-// ============================================================================
 // CreateRule (POST /rules)
 // ============================================================================
 
@@ -66,12 +34,8 @@ func TestRuleHandler_Create_WithValidPayload_ReturnsStatus201(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/rules", payload)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Errorf("expected status code 201, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPost, "/rules", payload)
+	assertStatusCode(t, rec, http.StatusCreated)
 }
 
 func TestRuleHandler_Create_WithInvalidPayload_ReturnsStatus400(t *testing.T) {
@@ -136,12 +100,8 @@ func TestRuleHandler_Create_WithInvalidPayload_ReturnsStatus400(t *testing.T) {
 				},
 			}
 
-			rec, req := buildTestRequest(http.MethodPost, "/rules", tt.payload)
-			setupRuleRouter(mock).ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("expected status code 400, got %d", rec.Code)
-			}
+			rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPost, "/rules", tt.payload)
+			assertStatusCode(t, rec, http.StatusBadRequest)
 		})
 	}
 }
@@ -153,12 +113,8 @@ func TestRuleHandler_Create_WithMalformedPayload_ReturnsStatus400(t *testing.T) 
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/rules", "invalid json")
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPost, "/rules", "invalid json")
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
@@ -173,12 +129,8 @@ func TestRuleHandler_GetByID_WithExistentRule_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, reqUrl, nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, reqUrl, nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_GetByID_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
@@ -188,12 +140,8 @@ func TestRuleHandler_GetByID_WithNonExistentRule_ReturnsStatus404(t *testing.T) 
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules/9999", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules/9999", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 func TestRuleHandler_GetByID_WithNilResult_ReturnsStatus404(t *testing.T) {
@@ -203,12 +151,8 @@ func TestRuleHandler_GetByID_WithNilResult_ReturnsStatus404(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules/9999", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules/9999", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 func TestRuleHandler_GetByID_WithInvalidID_ReturnsStatus400(t *testing.T) {
@@ -218,12 +162,8 @@ func TestRuleHandler_GetByID_WithInvalidID_ReturnsStatus400(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules/abc", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules/abc", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
@@ -240,12 +180,8 @@ func TestRuleHandler_List_WithSeededRules_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_List_WithoutSeededRules_ReturnsStatus200(t *testing.T) {
@@ -255,12 +191,8 @@ func TestRuleHandler_List_WithoutSeededRules_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_List_WithNilResult_ReturnsStatus200(t *testing.T) {
@@ -270,12 +202,8 @@ func TestRuleHandler_List_WithNilResult_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_List_WithQueryFilters_ReturnsStatus200(t *testing.T) {
@@ -287,12 +215,8 @@ func TestRuleHandler_List_WithQueryFilters_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules?rule_type=DOMAIN&action=ALLOW&value=test", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules?rule_type=DOMAIN&action=ALLOW&value=test", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_List_WhenServiceFails_ReturnsStatus500(t *testing.T) {
@@ -302,12 +226,8 @@ func TestRuleHandler_List_WhenServiceFails_ReturnsStatus500(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/rules", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected status code 500, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodGet, "/rules", nil)
+	assertStatusCode(t, rec, http.StatusInternalServerError)
 }
 
 // ============================================================================
@@ -325,12 +245,8 @@ func TestRuleHandler_Update_WithValidPayload_ReturnsStatus200(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/rules/1", payload)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPatch, "/rules/1", payload)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestRuleHandler_Update_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
@@ -340,12 +256,8 @@ func TestRuleHandler_Update_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/rules/9999", schemas.UpdateRuleSchema{})
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPatch, "/rules/9999", schemas.UpdateRuleSchema{})
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 func TestRuleHandler_Update_WithInvalidPayload_ReturnsStatus400(t *testing.T) {
@@ -364,12 +276,8 @@ func TestRuleHandler_Update_WithInvalidPayload_ReturnsStatus400(t *testing.T) {
 				},
 			}
 
-			rec, req := buildTestRequest(http.MethodPatch, "/rules/1", schemas.UpdateRuleSchema{})
-			setupRuleRouter(mock).ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusBadRequest {
-				t.Errorf("expected status code 400, got %d", rec.Code)
-			}
+			rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPatch, "/rules/1", schemas.UpdateRuleSchema{})
+			assertStatusCode(t, rec, http.StatusBadRequest)
 		})
 	}
 }
@@ -381,12 +289,8 @@ func TestRuleHandler_Update_WithMalformedPayload_ReturnsStatus400(t *testing.T) 
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/rules/1", "invalid json")
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPatch, "/rules/1", "invalid json")
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestRuleHandler_Update_WithInvalidID_ReturnsStatus400(t *testing.T) {
@@ -396,12 +300,8 @@ func TestRuleHandler_Update_WithInvalidID_ReturnsStatus400(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/rules/abc", schemas.UpdateRuleSchema{})
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodPatch, "/rules/abc", schemas.UpdateRuleSchema{})
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
@@ -415,12 +315,8 @@ func TestRuleHandler_Delete_WithExistentRule_ReturnsStatus204(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodDelete, "/rules/1", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("expected status code 204, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodDelete, "/rules/1", nil)
+	assertStatusCode(t, rec, http.StatusNoContent)
 }
 
 func TestRuleHandler_Delete_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
@@ -430,12 +326,8 @@ func TestRuleHandler_Delete_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodDelete, "/rules/9999", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodDelete, "/rules/9999", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 func TestRuleHandler_Delete_WithInvalidID_ReturnsStatus400(t *testing.T) {
@@ -445,19 +337,19 @@ func TestRuleHandler_Delete_WithInvalidID_ReturnsStatus400(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodDelete, "/rules/abc", nil)
-	setupRuleRouter(mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodDelete, "/rules/abc", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-func setupRuleRouter(svc handler.RuleServiceInterface) *chi.Mux {
+// setupRuleRouter builds a router wired with a rule handler backed by the
+// provided service mock.
+func setupRuleRouter(t *testing.T, svc handler.RuleServiceInterface) *chi.Mux {
+	t.Helper()
+
 	r := chi.NewRouter()
 	h := handler.NewRuleHandler(svc)
 	h.RegisterRoutes(r)

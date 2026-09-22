@@ -1,13 +1,10 @@
 package handler_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -16,38 +13,6 @@ import (
 	groupErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
 )
-
-// ============================================================================
-// Service mock
-// ============================================================================
-
-type mockGroupService struct {
-	createFn    func(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error)
-	listFn      func(ctx context.Context) ([]schemas.GroupOutputSchema, error)
-	getByNameFn func(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
-	renameFn    func(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
-	removeFn    func(ctx context.Context, p schemas.RemoveGroupSchema) error
-}
-
-func (m *mockGroupService) CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
-	return m.createFn(ctx, p)
-}
-
-func (m *mockGroupService) ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error) {
-	return m.listFn(ctx)
-}
-
-func (m *mockGroupService) GetGroupByName(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error) {
-	return m.getByNameFn(ctx, p)
-}
-
-func (m *mockGroupService) ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error) {
-	return m.renameFn(ctx, p)
-}
-
-func (m *mockGroupService) RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error {
-	return m.removeFn(ctx, p)
-}
 
 // ============================================================================
 // CreateGroup (POST /groups)
@@ -61,12 +26,8 @@ func TestGroupHandler_CreateGroup_WithValidPayload_ReturnsStatus201(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/groups", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Errorf("expected status code 201, go %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups", payload)
+	assertStatusCode(t, rec, http.StatusCreated)
 }
 
 func TestGroupHandler_CreateGroup_WithEmptyName_ReturnsStatus400(t *testing.T) {
@@ -77,12 +38,8 @@ func TestGroupHandler_CreateGroup_WithEmptyName_ReturnsStatus400(t *testing.T) {
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/groups", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups", payload)
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestGroupHandler_CreateGroup_WithExistentName_ReturnsStatus409(t *testing.T) {
@@ -93,12 +50,8 @@ func TestGroupHandler_CreateGroup_WithExistentName_ReturnsStatus409(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/groups", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("expected status code 409, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups", payload)
+	assertStatusCode(t, rec, http.StatusConflict)
 }
 
 func TestGroupHandler_CreateGroup_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
@@ -108,12 +61,8 @@ func TestGroupHandler_CreateGroup_WithMalformedPayload_ReturnsStatus400(t *testi
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/groups", "invalid json")
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups", "invalid json")
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestGroupHandler_CreateGroup_WithEmptyPayload_ReturnsStatus400(t *testing.T) {
@@ -123,12 +72,8 @@ func TestGroupHandler_CreateGroup_WithEmptyPayload_ReturnsStatus400(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPost, "/groups", "{}")
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups", "{}")
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
@@ -143,12 +88,8 @@ func TestGroupHandler_GetGroupByName_WithExistentGroup_ReturnsStatus200(t *testi
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, reqUrl, nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, reqUrl, nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestGroupHandler_GetGroupByName_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
@@ -159,12 +100,8 @@ func TestGroupHandler_GetGroupByName_WithNonExistentGroup_ReturnsStatus404(t *te
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, reqUrl, nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, reqUrl, nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 // ============================================================================
@@ -181,12 +118,8 @@ func TestGroupHandler_ListGroups_WithSeededGroups_ReturnsStatus200(t *testing.T)
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/groups", nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestGroupHandler_ListGroups_WithoutSeededGroups_ReturnsStatus200(t *testing.T) {
@@ -196,12 +129,8 @@ func TestGroupHandler_ListGroups_WithoutSeededGroups_ReturnsStatus200(t *testing
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodGet, "/groups", nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups", nil)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 // ============================================================================
@@ -216,12 +145,8 @@ func TestGroupHandler_RenameGroup_WithValidPayload_ReturnsStatus200(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected status code 200, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", payload)
+	assertStatusCode(t, rec, http.StatusOK)
 }
 
 func TestGroupHandler_RenameGroup_WithoutTargetGroupName_ReturnsStatus400(t *testing.T) {
@@ -232,12 +157,8 @@ func TestGroupHandler_RenameGroup_WithoutTargetGroupName_ReturnsStatus400(t *tes
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", payload)
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestGroupHandler_RenameGroup_WithoutNewName_ReturnsStatus400(t *testing.T) {
@@ -248,12 +169,8 @@ func TestGroupHandler_RenameGroup_WithoutNewName_ReturnsStatus400(t *testing.T) 
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", payload)
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestGroupHandler_RenameGroup_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
@@ -264,12 +181,8 @@ func TestGroupHandler_RenameGroup_WithNonExistentGroup_ReturnsStatus404(t *testi
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", payload)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 func TestGroupHandler_RenameGroup_WithExistentName_ReturnsStatus409(t *testing.T) {
@@ -280,12 +193,8 @@ func TestGroupHandler_RenameGroup_WithExistentName_ReturnsStatus409(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", payload)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("expected status code 409, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", payload)
+	assertStatusCode(t, rec, http.StatusConflict)
 }
 
 func TestGroupHandler_RenameGroup_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
@@ -295,12 +204,8 @@ func TestGroupHandler_RenameGroup_WithMalformedPayload_ReturnsStatus400(t *testi
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodPatch, "/groups/rename", "{}")
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected status code 400, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPatch, "/groups/rename", "{}")
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 // ============================================================================
@@ -315,12 +220,8 @@ func TestGroupHandler_RemoveGroup_WithValidPayload_ReturnsStatus204(t *testing.T
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodDelete, reqUrl, nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("expected status code 204, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, reqUrl, nil)
+	assertStatusCode(t, rec, http.StatusNoContent)
 }
 
 func TestGroupHandler_RemoveGroup_WithNonExistentGroup_ReturnsStatus404(t *testing.T) {
@@ -331,18 +232,16 @@ func TestGroupHandler_RemoveGroup_WithNonExistentGroup_ReturnsStatus404(t *testi
 		},
 	}
 
-	rec, req := buildTestRequest(http.MethodDelete, reqUrl, nil)
-	setupRouter(t, mock).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("expected status code 404, got %d", rec.Code)
-	}
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, reqUrl, nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
+// setupRouter builds a router wired with a group handler backed by the
+// provided service mock.
 func setupRouter(t *testing.T, svc handler.GroupServiceInterface) *chi.Mux {
 	t.Helper()
 
@@ -351,12 +250,4 @@ func setupRouter(t *testing.T, svc handler.GroupServiceInterface) *chi.Mux {
 	h.RegisterRoutes(r)
 
 	return r
-}
-
-func buildTestRequest(method, endpoint string, payload any) (*httptest.ResponseRecorder, *http.Request) {
-	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest(method, endpoint, bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	return httptest.NewRecorder(), req
 }
