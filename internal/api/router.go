@@ -32,6 +32,7 @@ func NewRouter(db *sql.DB) http.Handler {
 	registerHandlers(router,
 		handler.NewGroupHandler(service.NewGroupService(store.NewGroupStore(db))),
 		handler.NewRuleHandler(service.NewRuleService(store.NewRuleStore(db))),
+		handler.NewPolicyHandler(service.NewPolicyService(store.NewPolicyStore(db))),
 	)
 
 	return router
