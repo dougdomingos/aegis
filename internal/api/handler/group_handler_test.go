@@ -348,7 +348,7 @@ func setupRouter(t *testing.T, svc handler.GroupServiceInterface) *chi.Mux {
 
 	r := chi.NewRouter()
 	h := handler.NewGroupHandler(svc)
-	h.RegisterGroupRoutes(r)
+	h.RegisterRoutes(r)
 
 	return r
 }

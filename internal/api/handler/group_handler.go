@@ -31,7 +31,8 @@ func NewGroupHandler(s GroupServiceInterface) *GroupHandler {
 	return &GroupHandler{service: s}
 }
 
-func (handler *GroupHandler) RegisterGroupRoutes(r chi.Router) {
+// RegisterRoutes registers the group routes into the provided router.
+func (handler *GroupHandler) RegisterRoutes(r chi.Router) {
 	r.Route("/groups", func(r chi.Router) {
 		r.Post("/", handler.Create)
 		r.Get("/", handler.List)

@@ -33,9 +33,9 @@ func NewRuleHandler(s RuleServiceInterface) *RuleHandler {
 	return &RuleHandler{service: s}
 }
 
-// RegisterRuleRoutes registers the rule management routes into the provided
+// RegisterRoutes registers the rule management routes into the provided
 // router.
-func (handler *RuleHandler) RegisterRuleRoutes(r chi.Router) {
+func (handler *RuleHandler) RegisterRoutes(r chi.Router) {
 	r.Route("/rules", func(r chi.Router) {
 		r.Post("/", handler.Create)
 		r.Get("/", handler.List)

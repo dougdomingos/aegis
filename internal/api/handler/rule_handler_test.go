@@ -460,7 +460,7 @@ func TestRuleHandler_Delete_WithInvalidID_ReturnsStatus400(t *testing.T) {
 func setupRuleRouter(svc handler.RuleServiceInterface) *chi.Mux {
 	r := chi.NewRouter()
 	h := handler.NewRuleHandler(svc)
-	h.RegisterRuleRoutes(r)
+	h.RegisterRoutes(r)
 
 	return r
 }
