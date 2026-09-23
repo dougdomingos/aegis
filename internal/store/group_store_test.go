@@ -9,19 +9,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const queryInitGroupTable = `
-	CREATE TABLE IF NOT EXISTS groups (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT UNIQUE NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);`
-
 // ============================================================================
 // Create
 // ============================================================================
 
 func TestGroupStore_Create_WithValidName_CreatesGroup(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	name := "Test Group"
 
 	createdGroup, err := store.Create(ctx, name)
@@ -44,7 +37,7 @@ func TestGroupStore_Create_WithValidName_CreatesGroup(t *testing.T) {
 }
 
 func TestGroupStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	name := "Test Group"
 
 	_, err := store.Create(ctx, name)
@@ -63,7 +56,7 @@ func TestGroupStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
 // ============================================================================
 
 func TestGroupStore_GetByID_WithExistingID_ReturnsGroup(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	seededGroup, _ := store.Create(ctx, "Test Group")
 
 	group, err := store.GetByID(ctx, seededGroup.ID)
@@ -80,7 +73,7 @@ func TestGroupStore_GetByID_WithExistingID_ReturnsGroup(t *testing.T) {
 }
 
 func TestGroupStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 
 	group, err := store.GetByID(ctx, 999)
 
@@ -93,7 +86,7 @@ func TestGroupStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
 }
 
 func TestGroupStore_GetByName_WithExistingName_ReturnsGroup(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	name := "Test Group"
 	if _, err := store.Create(ctx, name); err != nil {
 		t.Fatalf("failed to seed group: %v", err)
@@ -113,7 +106,7 @@ func TestGroupStore_GetByName_WithExistingName_ReturnsGroup(t *testing.T) {
 }
 
 func TestGroupStore_GetByName_WithInexistentName_ReturnsNil(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 
 	group, err := store.GetByName(ctx, "Non-existent Group")
 
@@ -130,7 +123,7 @@ func TestGroupStore_GetByName_WithInexistentName_ReturnsNil(t *testing.T) {
 // ============================================================================
 
 func TestGroupStore_Exists_WithExistingGroup_ReturnsTrue(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	name := "Test Group"
 
 	if _, err := store.Create(ctx, name); err != nil {
@@ -148,7 +141,7 @@ func TestGroupStore_Exists_WithExistingGroup_ReturnsTrue(t *testing.T) {
 }
 
 func TestGroupStore_Exists_WithInexistentGroup_ReturnsFalse(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 
 	exists, err := store.Exists(ctx, "Unknown Group")
 
@@ -165,7 +158,7 @@ func TestGroupStore_Exists_WithInexistentGroup_ReturnsFalse(t *testing.T) {
 // ============================================================================
 
 func TestGroupStore_Update_WithValidData_UpdatesGroup(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	seededGroup, _ := store.Create(ctx, "Old Name")
 
 	seededGroup.Name = "New Name"
@@ -185,7 +178,7 @@ func TestGroupStore_Update_WithValidData_UpdatesGroup(t *testing.T) {
 }
 
 func TestGroupStore_Update_WithInexistentID_RejectsUpdate(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	target := domain.Group{ID: 999, Name: "Ghost Group"}
 
 	_, err := store.Update(ctx, target)
@@ -203,7 +196,7 @@ func TestGroupStore_Update_WithInexistentID_RejectsUpdate(t *testing.T) {
 // ============================================================================
 
 func TestGroupStore_List_WithSeededGroups_ReturnsAll(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	names := []string{"Group A", "Group B", "Group C"}
 	for _, name := range names {
 		if _, err := store.Create(ctx, name); err != nil {
@@ -224,7 +217,7 @@ func TestGroupStore_List_WithSeededGroups_ReturnsAll(t *testing.T) {
 }
 
 func TestGroupStore_List_WithEmptyDB_ReturnsEmptyList(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 
 	groups, err := store.List(ctx)
 
@@ -242,7 +235,7 @@ func TestGroupStore_List_WithEmptyDB_ReturnsEmptyList(t *testing.T) {
 // ============================================================================
 
 func TestGroupStore_Remove_WithExistingGroup_DeletesGroup(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 	name := "Test Group"
 
 	if _, err := store.Create(ctx, name); err != nil {
@@ -263,7 +256,7 @@ func TestGroupStore_Remove_WithExistingGroup_DeletesGroup(t *testing.T) {
 }
 
 func TestGroupStore_Remove_WithInexistentGroup_RejectsRemoval(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewGroupStore, queryInitGroupTable)
+	ctx, store := arrangeStoreTest(t, store.NewGroupStore)
 
 	err := store.Remove(ctx, "Unknown Group")
 

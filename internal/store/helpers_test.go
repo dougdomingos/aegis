@@ -4,19 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+
+	"dougdomingos.com/aegis/internal/infra/migrations"
 )
 
-// arrangeStoreTest sets up an in-memory SQLite database and provisions the
-// tables.
-func arrangeStoreTest[T any](t *testing.T, newStoreFn func(db *sql.DB) *T, tableSchema string) (context.Context, *T) {
+// arrangeStoreTest sets up an in-memory SQLite database and applies all
+// migrations to provision the schema.
+func arrangeStoreTest[T any](t *testing.T, newStoreFn func(db *sql.DB) *T) (context.Context, *T) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", ":memory:")
+	db, err := sql.Open("sqlite", "file::memory:?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("failed to open in-memory database: %v", err)
 	}
 
-	if _, err := db.Exec(tableSchema); err != nil {
+	if err := migrations.ApplyMigrations(db); err != nil {
 		t.Fatalf("failed to migrate database: %v", err)
 	}
 

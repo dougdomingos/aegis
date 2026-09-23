@@ -128,7 +128,8 @@ make test-coverage
 #### 5.3.1. Store tests
 
 - Use the `arrangeStoreTest` function to setup test scenarios
-- Declare the table schema as a constant at the top of the test file
+- `arrangeStoreTest` applies all migrations to provision the schema, so no
+  table schema should be declared or replicated in store tests
 
 #### 5.3.2. Service tests
 

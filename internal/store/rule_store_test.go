@@ -10,24 +10,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const queryInitRuleTable = `
-	CREATE TABLE IF NOT EXISTS rules (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		type TEXT NOT NULL,
-		value TEXT NOT NULL,
-		action TEXT NOT NULL,
-		protocol TEXT,
-		port INTEGER,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-`
-
 // ============================================================================
 // Create
 // ============================================================================
 
 func TestRuleStore_Create_WithValidData_CreatesRule(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rules := map[string]domain.Rule{
 		"Only required values": domain.NewDomainRule(domain.AllowAction, "test.com").Build(),
@@ -58,7 +46,7 @@ func TestRuleStore_Create_WithValidData_CreatesRule(t *testing.T) {
 }
 
 func TestRuleStore_Create_WithoutType_RejectsCreation(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	_, err := store.Create(ctx, domain.Rule{Action: domain.AllowAction, Value: "test.com"})
 
@@ -68,7 +56,7 @@ func TestRuleStore_Create_WithoutType_RejectsCreation(t *testing.T) {
 }
 
 func TestRuleStore_Create_WithoutAction_RejectsCreation(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	_, err := store.Create(ctx, domain.Rule{Type: domain.DomainRuleType, Value: "test.com"})
 
@@ -78,7 +66,7 @@ func TestRuleStore_Create_WithoutAction_RejectsCreation(t *testing.T) {
 }
 
 func TestRuleStore_Create_WithoutValue_RejectsCreation(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	_, err := store.Create(ctx, domain.Rule{Type: domain.DomainRuleType, Action: domain.AllowAction})
 
@@ -92,7 +80,7 @@ func TestRuleStore_Create_WithoutValue_RejectsCreation(t *testing.T) {
 // ============================================================================
 
 func TestRuleStore_GetByID_WithSeededIPRule_ReturnsRule(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	seededRule := seedRule(
 		t,
@@ -118,7 +106,7 @@ func TestRuleStore_GetByID_WithSeededIPRule_ReturnsRule(t *testing.T) {
 }
 
 func TestRuleStore_GetByID_WithSeededDomainRule_ReturnsRule(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
 	rule, err := store.GetByID(ctx, seededRule.ID)
@@ -135,7 +123,7 @@ func TestRuleStore_GetByID_WithSeededDomainRule_ReturnsRule(t *testing.T) {
 }
 
 func TestRuleStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	rule, err := store.GetByID(ctx, 9999)
 
 	if err != nil {
@@ -152,7 +140,7 @@ func TestRuleStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
 // ============================================================================
 
 func TestRuleStore_List_WithSeededRules_ReturnsAll(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rulesToSeed := []domain.Rule{
 		domain.NewDomainRule(domain.AllowAction, "test.com").Build(),
@@ -176,7 +164,7 @@ func TestRuleStore_List_WithSeededRules_ReturnsAll(t *testing.T) {
 }
 
 func TestRuleStore_List_WithTypeFilter_ReturnsMatchingRules(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rulesToSeed := []domain.Rule{
 		domain.NewDomainRule(domain.AllowAction, "test.com").Build(),
@@ -218,7 +206,7 @@ func TestRuleStore_List_WithTypeFilter_ReturnsMatchingRules(t *testing.T) {
 }
 
 func TestRuleStore_List_WithActionFilter_ReturnsMatchingRules(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rulesToSeed := []domain.Rule{
 		domain.NewDomainRule(domain.AllowAction, "test.com").Build(),
@@ -260,7 +248,7 @@ func TestRuleStore_List_WithActionFilter_ReturnsMatchingRules(t *testing.T) {
 }
 
 func TestRuleStore_List_WithValueFilter_ReturnsMatchingRules(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rulesToSeed := []domain.Rule{
 		domain.NewDomainRule(domain.AllowAction, "test.com").Build(),
@@ -304,7 +292,7 @@ func TestRuleStore_List_WithValueFilter_ReturnsMatchingRules(t *testing.T) {
 }
 
 func TestRuleStore_List_WithNoMatchingFilter_ReturnsEmpty(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	filter := domain.NewRuleFilter().
 		WithRuleType(new(domain.IPRuleType)).
@@ -332,7 +320,7 @@ func TestRuleStore_List_WithNoMatchingFilter_ReturnsEmpty(t *testing.T) {
 }
 
 func TestRuleStore_List_WithEmptyStore_ReturnsEmpty(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	rules, err := store.List(ctx, domain.RuleFilter{})
 
@@ -350,7 +338,7 @@ func TestRuleStore_List_WithEmptyStore_ReturnsEmpty(t *testing.T) {
 // ============================================================================
 
 func TestRuleStore_Update_WithValidData_UpdatesRule(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewIPRule(domain.AllowAction, "0.0.0.0").Build())
 	updatedRule := domain.NewIPRule(domain.DenyAction, "192.168.0.1").
 		WithProtocol("SSH").
@@ -371,7 +359,7 @@ func TestRuleStore_Update_WithValidData_UpdatesRule(t *testing.T) {
 }
 
 func TestRuleStore_Update_WithEmptyType_ReturnsError(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
 	seededRule.Type = ""
@@ -386,7 +374,7 @@ func TestRuleStore_Update_WithEmptyType_ReturnsError(t *testing.T) {
 }
 
 func TestRuleStore_Update_WithEmptyAction_ReturnsError(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
 	seededRule.Action = ""
@@ -401,7 +389,7 @@ func TestRuleStore_Update_WithEmptyAction_ReturnsError(t *testing.T) {
 }
 
 func TestRuleStore_Update_WithEmptyValue_ReturnsError(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
 	seededRule.Value = ""
@@ -416,7 +404,7 @@ func TestRuleStore_Update_WithEmptyValue_ReturnsError(t *testing.T) {
 }
 
 func TestRuleStore_Update_WithInexistentID_ReturnsError(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
 	seededRule.ID = 9999
@@ -435,7 +423,7 @@ func TestRuleStore_Update_WithInexistentID_ReturnsError(t *testing.T) {
 // ============================================================================
 
 func TestRuleStore_Remove_WithExistingID_DeletesRule(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	seededRule := seedRule(t, ctx, store, domain.NewDomainRule(domain.AllowAction, "test.com").Build())
 
@@ -451,7 +439,7 @@ func TestRuleStore_Remove_WithExistingID_DeletesRule(t *testing.T) {
 }
 
 func TestRuleStore_Remove_WithInexistentID_RejectsRemoval(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewRuleStore, queryInitRuleTable)
+	ctx, store := arrangeStoreTest(t, store.NewRuleStore)
 
 	err := store.Remove(ctx, 9999)
 

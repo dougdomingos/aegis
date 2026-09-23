@@ -9,21 +9,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const queryInitPolicyTable = `
-	CREATE TABLE IF NOT EXISTS policies (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		name TEXT UNIQUE NOT NULL,
-		version INTEGER NOT NULL DEFAULT 1,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);`
-
 // ============================================================================
 // Create
 // ============================================================================
 
 func TestPolicyStore_Create_WithValidName_CreatesPolicy(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
 	createdPolicy, err := store.Create(ctx, name)
@@ -54,7 +45,7 @@ func TestPolicyStore_Create_WithValidName_CreatesPolicy(t *testing.T) {
 }
 
 func TestPolicyStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
 	if _, err := store.Create(ctx, name); err != nil {
@@ -72,7 +63,7 @@ func TestPolicyStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
 // ============================================================================
 
 func TestPolicyStore_GetByID_WithExistingID_ReturnsPolicy(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	seededPolicy, _ := store.Create(ctx, "Test Policy")
 
 	policy, err := store.GetByID(ctx, seededPolicy.ID)
@@ -92,7 +83,7 @@ func TestPolicyStore_GetByID_WithExistingID_ReturnsPolicy(t *testing.T) {
 }
 
 func TestPolicyStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 
 	policy, err := store.GetByID(ctx, 999)
 
@@ -105,7 +96,7 @@ func TestPolicyStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
 }
 
 func TestPolicyStore_GetByName_WithExistingName_ReturnsPolicy(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 	if _, err := store.Create(ctx, name); err != nil {
 		t.Fatalf("failed to seed policy: %v", err)
@@ -125,7 +116,7 @@ func TestPolicyStore_GetByName_WithExistingName_ReturnsPolicy(t *testing.T) {
 }
 
 func TestPolicyStore_GetByName_WithInexistentName_ReturnsNil(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 
 	policy, err := store.GetByName(ctx, "Non-existent Policy")
 
@@ -142,7 +133,7 @@ func TestPolicyStore_GetByName_WithInexistentName_ReturnsNil(t *testing.T) {
 // ============================================================================
 
 func TestPolicyStore_Exists_WithExistingPolicy_ReturnsTrue(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
 	if _, err := store.Create(ctx, name); err != nil {
@@ -160,7 +151,7 @@ func TestPolicyStore_Exists_WithExistingPolicy_ReturnsTrue(t *testing.T) {
 }
 
 func TestPolicyStore_Exists_WithInexistentPolicy_ReturnsFalse(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 
 	exists, err := store.Exists(ctx, "Unknown Policy")
 
@@ -177,7 +168,7 @@ func TestPolicyStore_Exists_WithInexistentPolicy_ReturnsFalse(t *testing.T) {
 // ============================================================================
 
 func TestPolicyStore_Update_WithValidData_UpdatesPolicy(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	seededPolicy, _ := store.Create(ctx, "Old Name")
 
 	if seededPolicy.UpdatedAt.IsZero() {
@@ -207,7 +198,7 @@ func TestPolicyStore_Update_WithValidData_UpdatesPolicy(t *testing.T) {
 }
 
 func TestPolicyStore_Update_WithInexistentID_RejectsUpdate(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	target := domain.Policy{ID: 999, Name: "Ghost Policy"}
 
 	_, err := store.Update(ctx, target)
@@ -225,7 +216,7 @@ func TestPolicyStore_Update_WithInexistentID_RejectsUpdate(t *testing.T) {
 // ============================================================================
 
 func TestPolicyStore_List_WithSeededPolicies_ReturnsAll(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	names := []string{"Policy A", "Policy B", "Policy C"}
 	for _, name := range names {
 		if _, err := store.Create(ctx, name); err != nil {
@@ -246,7 +237,7 @@ func TestPolicyStore_List_WithSeededPolicies_ReturnsAll(t *testing.T) {
 }
 
 func TestPolicyStore_List_WithEmptyDB_ReturnsEmptyList(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 
 	policies, err := store.List(ctx)
 
@@ -264,7 +255,7 @@ func TestPolicyStore_List_WithEmptyDB_ReturnsEmptyList(t *testing.T) {
 // ============================================================================
 
 func TestPolicyStore_Remove_WithExistingPolicy_DeletesPolicy(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	seededPolicy, _ := store.Create(ctx, "Test Policy")
 
 	err := store.Remove(ctx, seededPolicy.ID)
@@ -280,7 +271,7 @@ func TestPolicyStore_Remove_WithExistingPolicy_DeletesPolicy(t *testing.T) {
 }
 
 func TestPolicyStore_Remove_WithInexistentPolicy_RejectsRemoval(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewPolicyStore, queryInitPolicyTable)
+	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 
 	err := store.Remove(ctx, 999)
 
