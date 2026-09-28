@@ -5,6 +5,20 @@ import (
 	"time"
 )
 
+// PolicyType represents the enforcement mode applied to the rules that
+// belong to a policy.
+type PolicyType string
+
+const (
+	// WhitelistPolicyType defines that only the rules of the policy are
+	// allowed (everything else is blocked).
+	WhitelistPolicyType PolicyType = "WHITELIST"
+
+	// BlacklistPolicyType defines that only the rules of the policy are
+	// blocked (everything else is allowed).
+	BlacklistPolicyType PolicyType = "BLACKLIST"
+)
+
 // Policy represents a set of rules that can be applied to a logical group of
 // machines.
 type Policy struct {
@@ -14,6 +28,10 @@ type Policy struct {
 
 	// Name is a unique, human-friendly label to identify the policy.
 	Name string
+
+	// Type is the enforcement mode applied to the rules that belong to this
+	// policy. Immutable after creation.
+	Type PolicyType
 
 	// Version is the number of modifications already applied to the policy.
 	// Starts at 1 and is incremented on every actual change.
@@ -32,7 +50,7 @@ type Policy struct {
 type PolicyStore interface {
 
 	// Create registers a new policy into the database.
-	Create(ctx context.Context, name string) (*Policy, error)
+	Create(ctx context.Context, name string, policyType PolicyType) (*Policy, error)
 
 	// GetByID retrieves the policy whose ID matches the provided argument.
 	GetByID(ctx context.Context, id int64) (*Policy, error)
