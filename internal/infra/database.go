@@ -24,7 +24,7 @@ func InitDB(path string) (*sql.DB, error) {
 	var err error
 
 	once.Do(func() {
-		dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", path)
+		dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)", path)
 		db, err = sql.Open("sqlite", dsn)
 		if err != nil {
 			return
