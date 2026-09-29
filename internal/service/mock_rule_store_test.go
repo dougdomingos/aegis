@@ -35,8 +35,8 @@ func (mock *MockRuleStore) Create(ctx context.Context, rule domain.Rule) (*domai
 	mock.nextID++
 	newRule := &domain.Rule{
 		ID:        mock.nextID,
+		PolicyID:  rule.PolicyID,
 		Type:      rule.Type,
-		Action:    rule.Action,
 		Value:     rule.Value,
 		Protocol:  rule.Protocol,
 		Port:      rule.Port,
