@@ -11,9 +11,9 @@ var (
 	// provided by the payload
 	ErrRuleTypeRequired = errors.New("must specify rule type")
 
-	// ErrRuleTypeRequired is returned when the action of a rule is required but
-	// not provided by the payload
-	ErrRuleActionRequired = errors.New("must specify rule action")
+	// ErrRulePolicyRequired is returned when a rule is registered without
+	// belonging to a policy.
+	ErrRulePolicyRequired = errors.New("rule must belong to a policy")
 
 	// ErrRuleTypeRequired is returned when the value of a rule is required but
 	// not provided by the payload
