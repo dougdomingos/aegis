@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"dougdomingos.com/aegis/internal/api/handler"
+	"dougdomingos.com/aegis/internal/domain"
 	policyErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
 )
@@ -20,11 +21,11 @@ import (
 func TestPolicyHandler_Create_WithValidPayload_ReturnsStatus201(t *testing.T) {
 	mock := &mockPolicyService{
 		createFn: func(_ context.Context, p schemas.CreatePolicySchema) (*schemas.PolicyOutputSchema, error) {
-			return &schemas.PolicyOutputSchema{Name: p.Name, Version: 1}, nil
+			return &schemas.PolicyOutputSchema{Name: p.Name, Type: p.Type, Version: 1}, nil
 		},
 	}
 
-	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy"})
+	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy", Type: domain.WhitelistPolicyType})
 	assertStatusCode(t, rec, http.StatusCreated)
 }
 
@@ -46,8 +47,30 @@ func TestPolicyHandler_Create_WithDuplicateName_ReturnsStatus409(t *testing.T) {
 		},
 	}
 
-	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy"})
+	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy", Type: domain.WhitelistPolicyType})
 	assertStatusCode(t, rec, http.StatusConflict)
+}
+
+func TestPolicyHandler_Create_WithEmptyType_ReturnsStatus400(t *testing.T) {
+	mock := &mockPolicyService{
+		createFn: func(_ context.Context, _ schemas.CreatePolicySchema) (*schemas.PolicyOutputSchema, error) {
+			return nil, policyErrors.ErrPolicyTypeRequired
+		},
+	}
+
+	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy"})
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestPolicyHandler_Create_WithUnsupportedType_ReturnsStatus400(t *testing.T) {
+	mock := &mockPolicyService{
+		createFn: func(_ context.Context, _ schemas.CreatePolicySchema) (*schemas.PolicyOutputSchema, error) {
+			return nil, policyErrors.ErrInvalidPolicyType
+		},
+	}
+
+	rec := performRequest(t, setupPolicyRouter(t, mock), http.MethodPost, "/policies", schemas.CreatePolicySchema{Name: "Test Policy", Type: "BOGUS"})
+	assertStatusCode(t, rec, http.StatusBadRequest)
 }
 
 func TestPolicyHandler_Create_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
