@@ -23,7 +23,7 @@ type RuleServiceInterface interface {
 }
 
 // RuleHandler implements the methods that map HTTP requests into operations
-// within the application.
+// within the application. Rules are exposed as a sub-resource of policies.
 type RuleHandler struct {
 	service RuleServiceInterface
 }
@@ -34,33 +34,41 @@ func NewRuleHandler(s RuleServiceInterface) *RuleHandler {
 }
 
 // RegisterRoutes registers the rule management routes into the provided
-// router.
+// router, scoped under the policy that owns the rules.
 func (handler *RuleHandler) RegisterRoutes(r chi.Router) {
-	r.Route("/rules", func(r chi.Router) {
+	r.Route("/policies/{policyID}/rules", func(r chi.Router) {
 		r.Post("/", handler.Create)
 		r.Get("/", handler.List)
-		r.Get("/{id}", handler.GetByID)
-		r.Patch("/{id}", handler.Update)
-		r.Delete("/{id}", handler.Delete)
+		r.Get("/{ruleID}", handler.GetByID)
+		r.Patch("/{ruleID}", handler.Update)
+		r.Delete("/{ruleID}", handler.Delete)
 	})
 }
 
-// Create registers a new rule within the system.
+// Create registers a new rule within the policy referenced in the URL.
 func (handler *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
+	policyID, ok := parsePolicyID(w, r, "policyID")
+	if !ok {
+		return
+	}
+
 	var payload schemas.CreateRuleSchema
 	if !utils.DecodePayload(w, r, &payload) {
 		return
 	}
 
+	payload.PolicyID = policyID
+
 	res, err := handler.service.CreateRule(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
+			errors.ErrRulePolicyRequired:      http.StatusBadRequest,
 			errors.ErrRuleTypeRequired:        http.StatusBadRequest,
-			errors.ErrRuleActionRequired:      http.StatusBadRequest,
 			errors.ErrRuleValueRequired:       http.StatusBadRequest,
 			errors.ErrMalformedRuleValue:      http.StatusBadRequest,
 			errors.ErrInvalidFieldForRuleType: http.StatusBadRequest,
 			errors.ErrInvalidRulePortValue:    http.StatusBadRequest,
+			errors.ErrPolicyNotFound:          http.StatusNotFound,
 		})
 
 		return
@@ -69,19 +77,21 @@ func (handler *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	utils.EncodeToJSON(w, http.StatusCreated, res)
 }
 
-// List returns all the rules that match the provided query filters. If no
-// filter is provided, it returns every rule registered within the system.
+// List returns all the rules that belong to the policy referenced in the URL
+// and match the provided query filters. If no filter is provided, it returns
+// every rule of that policy.
 func (handler *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
+	policyID, ok := parsePolicyID(w, r, "policyID")
+	if !ok {
+		return
+	}
+
 	var payload schemas.ListRulesSchema
+	payload.PolicyID = policyID
 
 	if value := r.URL.Query().Get("rule_type"); value != "" {
 		ruleType := domain.RuleType(value)
 		payload.Type = &ruleType
-	}
-
-	if value := r.URL.Query().Get("action"); value != "" {
-		action := domain.RuleAction(value)
-		payload.Action = &action
 	}
 
 	if value := r.URL.Query().Get("value"); value != "" {
@@ -90,7 +100,9 @@ func (handler *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	rules, err := handler.service.ListRules(r.Context(), payload)
 	if err != nil {
-		utils.MapByError(w, err, nil)
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrPolicyNotFound: http.StatusNotFound,
+		})
 		return
 	}
 
@@ -101,14 +113,17 @@ func (handler *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 	utils.EncodeToJSON(w, http.StatusOK, rules)
 }
 
-// GetByID retrieves a rule by its ID.
+// GetByID retrieves a rule by its ID within the policy referenced in the URL.
 func (handler *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseRuleID(w, r, "id")
+	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {
 		return
 	}
 
-	res, err := handler.service.GetRuleByID(r.Context(), schemas.GetRuleByIDSchema{ID: id})
+	res, err := handler.service.GetRuleByID(r.Context(), schemas.GetRuleByIDSchema{
+		PolicyID: policyID,
+		ID:       ruleID,
+	})
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			errors.ErrRuleNotFound: http.StatusNotFound,
@@ -124,9 +139,10 @@ func (handler *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	utils.EncodeToJSON(w, http.StatusOK, res)
 }
 
-// Update applies the provided changes to an existent rule.
+// Update applies the provided changes to an existent rule within the policy
+// referenced in the URL.
 func (handler *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseRuleID(w, r, "id")
+	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {
 		return
 	}
@@ -136,14 +152,14 @@ func (handler *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payload.ID = id
+	payload.PolicyID = policyID
+	payload.ID = ruleID
 
 	res, err := handler.service.UpdateRule(r.Context(), payload)
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			errors.ErrRuleNotFound:            http.StatusNotFound,
 			errors.ErrRuleTypeRequired:        http.StatusBadRequest,
-			errors.ErrRuleActionRequired:      http.StatusBadRequest,
 			errors.ErrRuleValueRequired:       http.StatusBadRequest,
 			errors.ErrMalformedRuleValue:      http.StatusBadRequest,
 			errors.ErrInvalidFieldForRuleType: http.StatusBadRequest,
@@ -156,14 +172,17 @@ func (handler *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	utils.EncodeToJSON(w, http.StatusOK, res)
 }
 
-// Delete removes a rule by its ID.
+// Delete removes a rule by its ID within the policy referenced in the URL.
 func (handler *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseRuleID(w, r, "id")
+	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {
 		return
 	}
 
-	err := handler.service.RemoveRule(r.Context(), schemas.RemoveRuleSchema{ID: id})
+	err := handler.service.RemoveRule(r.Context(), schemas.RemoveRuleSchema{
+		PolicyID: policyID,
+		ID:       ruleID,
+	})
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			errors.ErrRuleNotFound: http.StatusNotFound,
@@ -173,6 +192,23 @@ func (handler *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseScopedRuleID decodes both the policyID and ruleID URL parameters. If
+// any of them is not a valid number, it writes an HTTP 400 Bad Request and
+// returns false.
+func parseScopedRuleID(w http.ResponseWriter, r *http.Request) (int64, int, bool) {
+	policyID, ok := parsePolicyID(w, r, "policyID")
+	if !ok {
+		return 0, 0, false
+	}
+
+	ruleID, ok := parseRuleID(w, r, "ruleID")
+	if !ok {
+		return 0, 0, false
+	}
+
+	return policyID, ruleID, true
 }
 
 // parseRuleID decodes the named URL parameter into an integer. If the

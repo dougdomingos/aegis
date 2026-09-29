@@ -29,10 +29,12 @@ func NewRouter(db *sql.DB) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
 
+	policyStore := store.NewPolicyStore(db)
+
 	registerHandlers(router,
 		handler.NewGroupHandler(service.NewGroupService(store.NewGroupStore(db))),
-		handler.NewRuleHandler(service.NewRuleService(store.NewRuleStore(db))),
-		handler.NewPolicyHandler(service.NewPolicyService(store.NewPolicyStore(db))),
+		handler.NewPolicyHandler(service.NewPolicyService(policyStore)),
+		handler.NewRuleHandler(service.NewRuleService(store.NewRuleStore(db), policyStore)),
 	)
 
 	return router
