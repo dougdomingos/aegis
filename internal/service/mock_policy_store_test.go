@@ -27,7 +27,7 @@ func NewMockPolicyStore() *MockPolicyStore {
 }
 
 // Create persists a new policy or returns StoreErr if set.
-func (mock *MockPolicyStore) Create(ctx context.Context, name string) (*domain.Policy, error) {
+func (mock *MockPolicyStore) Create(ctx context.Context, name string, policyType domain.PolicyType) (*domain.Policy, error) {
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}
@@ -43,6 +43,7 @@ func (mock *MockPolicyStore) Create(ctx context.Context, name string) (*domain.P
 	policy := &domain.Policy{
 		ID:        mock.nextID,
 		Name:      name,
+		Type:      policyType,
 		Version:   1,
 		CreatedAt: now,
 		UpdatedAt: now,

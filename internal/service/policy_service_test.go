@@ -17,7 +17,7 @@ import (
 
 func TestPolicyService_CreatePolicy_WithValidPayload_AcceptsCreation(t *testing.T) {
 	ctx, _, service := arrangePolicyServiceTest(t)
-	payload := schemas.CreatePolicySchema{Name: "Test Policy"}
+	payload := schemas.CreatePolicySchema{Name: "Test Policy", Type: domain.WhitelistPolicyType}
 
 	createdPolicy, err := service.CreatePolicy(ctx, payload)
 
@@ -31,6 +31,10 @@ func TestPolicyService_CreatePolicy_WithValidPayload_AcceptsCreation(t *testing.
 
 	if createdPolicy.Name != payload.Name {
 		t.Errorf("expected policy name %q, got %q", payload.Name, createdPolicy.Name)
+	}
+
+	if createdPolicy.Type != payload.Type {
+		t.Errorf("expected policy type %q, got %q", payload.Type, createdPolicy.Type)
 	}
 
 	if createdPolicy.Version != 1 {
@@ -57,9 +61,9 @@ func TestPolicyService_CreatePolicy_WithValidPayload_AcceptsCreation(t *testing.
 
 func TestPolicyService_CreatePolicy_WithDuplicatedName_RejectsCreation(t *testing.T) {
 	ctx, store, service := arrangePolicyServiceTest(t)
-	payload := schemas.CreatePolicySchema{Name: "Test Policy"}
+	payload := schemas.CreatePolicySchema{Name: "Test Policy", Type: domain.WhitelistPolicyType}
 
-	if _, err := store.Create(ctx, payload.Name); err != nil {
+	if _, err := store.Create(ctx, payload.Name, domain.WhitelistPolicyType); err != nil {
 		t.Fatalf("failed to seed initial policy: %v", err)
 	}
 
@@ -94,10 +98,51 @@ func TestPolicyService_CreatePolicy_WhenStoreFails_RejectsCreation(t *testing.T)
 	expectedErr := errors.New("failed to insert policy into database")
 	store.StoreErr = expectedErr
 
-	payload := schemas.CreatePolicySchema{Name: "Test Policy"}
+	payload := schemas.CreatePolicySchema{Name: "Test Policy", Type: domain.WhitelistPolicyType}
 
 	if _, err := service.CreatePolicy(ctx, payload); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)
+	}
+}
+
+func TestPolicyService_CreatePolicy_WithEmptyType_RejectsCreation(t *testing.T) {
+	ctx, _, service := arrangePolicyServiceTest(t)
+	payload := schemas.CreatePolicySchema{Name: "Test Policy", Type: ""}
+
+	createdPolicy, err := service.CreatePolicy(ctx, payload)
+
+	if !errors.Is(err, policyErrors.ErrPolicyTypeRequired) {
+		t.Errorf("expected error %q, got %q", policyErrors.ErrPolicyTypeRequired, err)
+	}
+
+	if createdPolicy != nil {
+		t.Errorf("expected returned policy to be nil on error, got %+v", createdPolicy)
+	}
+}
+
+func TestPolicyService_CreatePolicy_WithUnsupportedType_RejectsCreation(t *testing.T) {
+	ctx, _, service := arrangePolicyServiceTest(t)
+
+	testCases := map[string]domain.PolicyType{
+		"Lowercase whitelist": "whitelist",
+		"Unknown type":        "bogus",
+		"Rule action":         "ALLOW",
+	}
+
+	for testName, policyType := range testCases {
+		t.Run(testName, func(t *testing.T) {
+			payload := schemas.CreatePolicySchema{Name: "Test Policy", Type: policyType}
+
+			createdPolicy, err := service.CreatePolicy(ctx, payload)
+
+			if !errors.Is(err, policyErrors.ErrInvalidPolicyType) {
+				t.Errorf("expected error %q, got %q", policyErrors.ErrInvalidPolicyType, err)
+			}
+
+			if createdPolicy != nil {
+				t.Errorf("expected returned policy to be nil on error, got %+v", createdPolicy)
+			}
+		})
 	}
 }
 
@@ -247,6 +292,26 @@ func TestPolicyService_UpdatePolicy_WithSameName_KeepsVersionUnchanged(t *testin
 	}
 }
 
+func TestPolicyService_UpdatePolicy_WithRenamedPolicy_KeepsTypeUnchanged(t *testing.T) {
+	ctx, store, service := arrangePolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Test Policy")
+	update := schemas.UpdatePolicySchema{ID: seededPolicy.ID, Name: "Renamed Policy"}
+
+	updatedPolicy, err := service.UpdatePolicy(ctx, update)
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if updatedPolicy.Name != update.Name {
+		t.Errorf("expected policy name to be %q, got %q", update.Name, updatedPolicy.Name)
+	}
+
+	if updatedPolicy.Type != seededPolicy.Type {
+		t.Errorf("expected policy type to stay %q, got %q", seededPolicy.Type, updatedPolicy.Type)
+	}
+}
+
 func TestPolicyService_UpdatePolicy_WithEmptyName_RejectsChange(t *testing.T) {
 	ctx, _, service := arrangePolicyServiceTest(t)
 	update := schemas.UpdatePolicySchema{ID: 1, Name: ""}
@@ -349,7 +414,7 @@ func arrangePolicyServiceTest(t *testing.T) (context.Context, *MockPolicyStore, 
 func seedPolicy(t *testing.T, ctx context.Context, store *MockPolicyStore, name string) *domain.Policy {
 	t.Helper()
 
-	seededPolicy, err := store.Create(ctx, name)
+	seededPolicy, err := store.Create(ctx, name, domain.WhitelistPolicyType)
 	if err != nil {
 		t.Fatalf("failed to seed policy %q: %v", name, err)
 	}
@@ -363,6 +428,7 @@ func mapOutputToPolicy(output schemas.PolicyOutputSchema) domain.Policy {
 	return domain.Policy{
 		ID:        output.ID,
 		Name:      output.Name,
+		Type:      output.Type,
 		Version:   output.Version,
 		CreatedAt: output.CreatedAt,
 		UpdatedAt: output.UpdatedAt,

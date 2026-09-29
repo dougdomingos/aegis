@@ -31,6 +31,10 @@ func (service *PolicyService) CreatePolicy(ctx context.Context, payload schemas.
 		return nil, errors.ErrPolicyNameRequired
 	}
 
+	if err := validatePolicyType(payload.Type); err != nil {
+		return nil, err
+	}
+
 	existentPolicy, err := service.store.GetByName(ctx, payload.Name)
 	if err != nil {
 		return nil, err
@@ -40,7 +44,7 @@ func (service *PolicyService) CreatePolicy(ctx context.Context, payload schemas.
 		return nil, errors.ErrPolicyNameAlreadyExists
 	}
 
-	newPolicy, err := service.store.Create(ctx, payload.Name)
+	newPolicy, err := service.store.Create(ctx, payload.Name, payload.Type)
 	if err != nil {
 		return nil, fmt.Errorf("failed to register new policy: %w", err)
 	}
@@ -76,7 +80,8 @@ func (service *PolicyService) ListPolicies(ctx context.Context) ([]schemas.Polic
 
 // UpdatePolicy renames an existent policy. The new name must be unique; if it
 // matches the current name, the operation is a no-op that does not touch the
-// policy version or updated_at timestamp.
+// policy version or updated_at timestamp. The policy type is immutable and is
+// therefore absent from the update contract, so it cannot be changed here.
 func (service *PolicyService) UpdatePolicy(ctx context.Context, payload schemas.UpdatePolicySchema) (*schemas.PolicyOutputSchema, error) {
 	if strings.TrimSpace(payload.Name) == "" {
 		return nil, errors.ErrPolicyNameRequired
@@ -143,8 +148,23 @@ func mapPolicyToOutputSchema(policy *domain.Policy) *schemas.PolicyOutputSchema 
 	return &schemas.PolicyOutputSchema{
 		ID:        policy.ID,
 		Name:      policy.Name,
+		Type:      policy.Type,
 		Version:   policy.Version,
 		CreatedAt: policy.CreatedAt,
 		UpdatedAt: policy.UpdatedAt,
 	}
+}
+
+// validatePolicyType checks whether the provided policy type is informed and
+// supported by the system.
+func validatePolicyType(policyType domain.PolicyType) error {
+	if strings.TrimSpace(string(policyType)) == "" {
+		return errors.ErrPolicyTypeRequired
+	}
+
+	if policyType != domain.WhitelistPolicyType && policyType != domain.BlacklistPolicyType {
+		return errors.ErrInvalidPolicyType
+	}
+
+	return nil
 }
