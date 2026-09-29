@@ -8,12 +8,12 @@ import (
 	"dougdomingos.com/aegis/internal/infra/migrations"
 )
 
-// arrangeStoreTest sets up an in-memory SQLite database and applies all
+// arrangeStoreDB sets up an in-memory SQLite database and applies all
 // migrations to provision the schema.
-func arrangeStoreTest[T any](t *testing.T, newStoreFn func(db *sql.DB) *T) (context.Context, *T) {
+func arrangeStoreDB(t *testing.T) (context.Context, *sql.DB) {
 	t.Helper()
 
-	db, err := sql.Open("sqlite", "file::memory:?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", "file::memory:?mode=memory&cache=shared&_pragma=foreign_keys(ON)")
 	if err != nil {
 		t.Fatalf("failed to open in-memory database: %v", err)
 	}
@@ -26,6 +26,13 @@ func arrangeStoreTest[T any](t *testing.T, newStoreFn func(db *sql.DB) *T) (cont
 		db.Close()
 	})
 
-	store := newStoreFn(db)
-	return context.Background(), store
+	return context.Background(), db
+}
+
+// arrangeStoreTest provisions the schema and builds a store instance over it.
+func arrangeStoreTest[T any](t *testing.T, newStoreFn func(db *sql.DB) *T) (context.Context, *T) {
+	t.Helper()
+
+	ctx, db := arrangeStoreDB(t)
+	return ctx, newStoreFn(db)
 }

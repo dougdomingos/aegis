@@ -5,15 +5,20 @@ type IPRuleBuilder struct {
 	rule Rule
 }
 
-// NewIPRule initializes a new IPRuleBuilder instance with action and target value.
-func NewIPRule(action RuleAction, value string) *IPRuleBuilder {
+// NewIPRule initializes a new IPRuleBuilder instance with the target value.
+func NewIPRule(value string) *IPRuleBuilder {
 	return &IPRuleBuilder{
 		rule: Rule{
-			Type:   IPRuleType,
-			Action: action,
-			Value:  value,
+			Type:  IPRuleType,
+			Value: value,
 		},
 	}
+}
+
+// WithPolicy sets the policy that owns the rule.
+func (b *IPRuleBuilder) WithPolicy(policyID int64) *IPRuleBuilder {
+	b.rule.PolicyID = policyID
+	return b
 }
 
 // WithProtocol sets the targeted network protocol for an IP rule.
@@ -38,15 +43,20 @@ type DomainRuleBuilder struct {
 	rule Rule
 }
 
-// NewDomainRule initializes a new DomainRuleBuilder instance with action and target value.
-func NewDomainRule(action RuleAction, value string) *DomainRuleBuilder {
+// NewDomainRule initializes a new DomainRuleBuilder instance with the target value.
+func NewDomainRule(value string) *DomainRuleBuilder {
 	return &DomainRuleBuilder{
 		rule: Rule{
-			Type:   DomainRuleType,
-			Action: action,
-			Value:  value,
+			Type:  DomainRuleType,
+			Value: value,
 		},
 	}
+}
+
+// WithPolicy sets the policy that owns the rule.
+func (b *DomainRuleBuilder) WithPolicy(policyID int64) *DomainRuleBuilder {
+	b.rule.PolicyID = policyID
+	return b
 }
 
 // Build constructs and returns the finalized Domain Rule instance.

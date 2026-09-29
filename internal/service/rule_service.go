@@ -14,18 +14,28 @@ type RuleService struct {
 
 	// store provides database operations related to rules
 	store domain.RuleStore
+
+	// policies provides database operations related to policies, used to
+	// scope rules into their owning policy.
+	policies domain.PolicyStore
 }
 
 // NewRuleService creates a new service instance with the provided store
-// manager.
-func NewRuleService(store domain.RuleStore) *RuleService {
-	return &RuleService{store: store}
+// managers.
+func NewRuleService(store domain.RuleStore, policies domain.PolicyStore) *RuleService {
+	return &RuleService{store: store, policies: policies}
 }
 
+// CreateRule registers a new rule within the referenced policy. The policy
+// must exist, otherwise the operation fails.
 func (service *RuleService) CreateRule(ctx context.Context, p schemas.CreateRuleSchema) (*schemas.RuleOutputSchema, error) {
+	if err := service.ensurePolicyExists(ctx, p.PolicyID); err != nil {
+		return nil, err
+	}
+
 	rulePayload := domain.Rule{
+		PolicyID: p.PolicyID,
 		Type:     p.Type,
-		Action:   p.Action,
 		Value:    p.Value,
 		Protocol: p.Protocol,
 		Port:     p.Port,
@@ -43,19 +53,28 @@ func (service *RuleService) CreateRule(ctx context.Context, p schemas.CreateRule
 	return mapRuleToOutputSchema(newRule), nil
 }
 
+// GetRuleByID retrieves a rule owned by the referenced policy. If no rule
+// matches the requested ID within that policy, it returns nil.
 func (service *RuleService) GetRuleByID(ctx context.Context, p schemas.GetRuleByIDSchema) (*schemas.RuleOutputSchema, error) {
-	existentRule, err := service.store.GetByID(ctx, int64(p.ID))
+	rule, err := service.getRuleFromPolicy(ctx, p.PolicyID, int64(p.ID))
 	if err != nil {
 		return nil, err
 	}
 
-	return mapRuleToOutputSchema(existentRule), nil
+	return mapRuleToOutputSchema(rule), nil
 }
 
+// ListRules returns all the rules that belong to the referenced policy and
+// match the provided filters. The policy must exist, otherwise the operation
+// fails.
 func (service *RuleService) ListRules(ctx context.Context, p schemas.ListRulesSchema) ([]schemas.RuleOutputSchema, error) {
+	if err := service.ensurePolicyExists(ctx, p.PolicyID); err != nil {
+		return nil, err
+	}
+
 	filter := domain.NewRuleFilter().
+		WithPolicyID(p.PolicyID).
 		WithRuleType(p.Type).
-		WithAction(p.Action).
 		WithValue(p.Value).
 		Build()
 
@@ -72,15 +91,16 @@ func (service *RuleService) ListRules(ctx context.Context, p schemas.ListRulesSc
 	return output, nil
 }
 
+// UpdateRule applies partial changes to a rule owned by the referenced
+// policy. If no rule matches the requested ID within that policy, it returns
+// an error.
 func (service *RuleService) UpdateRule(ctx context.Context, p schemas.UpdateRuleSchema) (*schemas.RuleOutputSchema, error) {
-	ruleID := int64(p.ID)
-	rule, err := service.store.GetByID(ctx, ruleID)
+	rule, err := service.getRuleFromPolicy(ctx, p.PolicyID, int64(p.ID))
 	if err != nil {
 		return nil, err
 	}
 
 	rule.Patch(domain.RulePatch{
-		Action:   p.Action,
 		Value:    p.Value,
 		Protocol: p.Protocol,
 		Port:     p.Port,
@@ -98,24 +118,54 @@ func (service *RuleService) UpdateRule(ctx context.Context, p schemas.UpdateRule
 	return mapRuleToOutputSchema(updatedRule), nil
 }
 
+// RemoveRule deletes a rule owned by the referenced policy. If no rule
+// matches the requested ID within that policy, it returns an error.
 func (service *RuleService) RemoveRule(ctx context.Context, p schemas.RemoveRuleSchema) error {
-	ruleID := int64(p.ID)
-	rule, err := service.store.GetByID(ctx, ruleID)
+	rule, err := service.getRuleFromPolicy(ctx, p.PolicyID, int64(p.ID))
 	if err != nil {
 		return err
 	}
 
-	if rule == nil {
-		return errors.ErrRuleNotFound
-	}
-
-	if err := service.store.Remove(ctx, ruleID); err != nil {
-		return fmt.Errorf("failed to remove rule %d: %v", ruleID, err)
+	if err := service.store.Remove(ctx, rule.ID); err != nil {
+		return fmt.Errorf("failed to remove rule %d: %v", rule.ID, err)
 	}
 
 	return nil
 }
 
+// ensurePolicyExists checks whether a policy with the provided ID exists
+// within the database.
+func (service *RuleService) ensurePolicyExists(ctx context.Context, policyID int64) error {
+	policy, err := service.policies.GetByID(ctx, policyID)
+	if err != nil {
+		return err
+	}
+
+	if policy == nil {
+		return errors.ErrPolicyNotFound
+	}
+
+	return nil
+}
+
+// getRuleFromPolicy retrieves a rule by its ID, ensuring it belongs to the
+// referenced policy. Non-existent rules and rules owned by other policies
+// both result in ErrRuleNotFound.
+func (service *RuleService) getRuleFromPolicy(ctx context.Context, policyID, ruleID int64) (*domain.Rule, error) {
+	rule, err := service.store.GetByID(ctx, ruleID)
+	if err != nil {
+		return nil, err
+	}
+
+	if rule == nil || rule.PolicyID != policyID {
+		return nil, errors.ErrRuleNotFound
+	}
+
+	return rule, nil
+}
+
+// mapRuleToOutputSchema converts the Rule entity format into the output
+// schema provided by this service. Returns nil if the provided rule is nil.
 func mapRuleToOutputSchema(rule *domain.Rule) *schemas.RuleOutputSchema {
 	if rule == nil {
 		return nil
@@ -123,8 +173,8 @@ func mapRuleToOutputSchema(rule *domain.Rule) *schemas.RuleOutputSchema {
 
 	return &schemas.RuleOutputSchema{
 		ID:        int(rule.ID),
+		PolicyID:  rule.PolicyID,
 		Type:      rule.Type,
-		Action:    rule.Action,
 		Value:     rule.Value,
 		Protocol:  rule.Protocol,
 		Port:      rule.Port,

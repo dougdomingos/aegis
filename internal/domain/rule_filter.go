@@ -10,15 +10,14 @@ import (
 // simultaneously.
 type RuleFilter struct {
 
+	// PolicyID is the identifier of the policy whose rules are being listed.
+	PolicyID int64
+
 	// Value is an optional filter matching exact or partial rule target values.
 	Value *string
 
 	// Type is an optional filter matching specific rule types (e.g., IP, DOMAIN).
 	Type *RuleType
-
-	// Action is an optional filter matching specific rule actions
-	// (e.g., ALLOW, DENY).
-	Action *RuleAction
 }
 
 // Matches takes a rule and verifies whether it matches the definitions of a
@@ -26,9 +25,9 @@ type RuleFilter struct {
 func (filter *RuleFilter) Matches(rule Rule) bool {
 	matches := true
 
-	if filter.Type != nil && rule.Type != *filter.Type {
+	if rule.PolicyID != filter.PolicyID {
 		matches = false
-	} else if filter.Action != nil && rule.Action != *filter.Action {
+	} else if filter.Type != nil && rule.Type != *filter.Type {
 		matches = false
 	} else if filter.Value != nil && !strings.Contains(rule.Value, *filter.Value) {
 		matches = false
@@ -49,6 +48,12 @@ func NewRuleFilter() *RuleFilterBuilder {
 	}
 }
 
+// WithPolicyID sets the policy scoping condition.
+func (builder *RuleFilterBuilder) WithPolicyID(policyID int64) *RuleFilterBuilder {
+	builder.filter.PolicyID = policyID
+	return builder
+}
+
 // WithValue sets the target value filter condition.
 func (builder *RuleFilterBuilder) WithValue(value *string) *RuleFilterBuilder {
 	builder.filter.Value = value
@@ -61,17 +66,11 @@ func (builder *RuleFilterBuilder) WithRuleType(ruleType *RuleType) *RuleFilterBu
 	return builder
 }
 
-// WithAction sets the rule action filter condition.
-func (builder *RuleFilterBuilder) WithAction(action *RuleAction) *RuleFilterBuilder {
-	builder.filter.Action = action
-	return builder
-}
-
 // Build constructs and returns the finalized RuleFilter instance.
 func (builder *RuleFilterBuilder) Build() RuleFilter {
 	return RuleFilter{
-		Type:   builder.filter.Type,
-		Action: builder.filter.Action,
-		Value:  builder.filter.Value,
+		PolicyID: builder.filter.PolicyID,
+		Type:     builder.filter.Type,
+		Value:    builder.filter.Value,
 	}
 }

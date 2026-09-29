@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	queryCreatePolicy     = "INSERT INTO policies (name) VALUES (?)"
-	queryGetPolicyByID    = "SELECT id, name, version, created_at, updated_at FROM policies WHERE id = ?"
-	queryGetPolicyByName  = "SELECT id, name, version, created_at, updated_at FROM policies WHERE name = ?"
-	queryGetAllPolicies   = "SELECT id, name, version, created_at, updated_at FROM policies"
+	queryCreatePolicy     = "INSERT INTO policies (name, type) VALUES (?,?)"
+	queryGetPolicyByID    = "SELECT id, name, type, version, created_at, updated_at FROM policies WHERE id = ?"
+	queryGetPolicyByName  = "SELECT id, name, type, version, created_at, updated_at FROM policies WHERE name = ?"
+	queryGetAllPolicies   = "SELECT id, name, type, version, created_at, updated_at FROM policies"
 	queryUpdatePolicyByID = "UPDATE policies SET name = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	queryDeletePolicyByID = "DELETE FROM policies WHERE id = ?"
 )
@@ -30,11 +30,11 @@ func NewPolicyStore(db *sql.DB) *PolicyStore {
 	}
 }
 
-func (store *PolicyStore) Create(ctx context.Context, name string) (*domain.Policy, error) {
+func (store *PolicyStore) Create(ctx context.Context, name string, policyType domain.PolicyType) (*domain.Policy, error) {
 	var createdPolicy *domain.Policy
 
 	err := store.executor.WithTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, queryCreatePolicy, name)
+		result, err := tx.ExecContext(ctx, queryCreatePolicy, name, policyType)
 		if err != nil {
 			return fmt.Errorf("failed to create policy %q: %w", name, err)
 		}
@@ -121,7 +121,7 @@ func (store *PolicyStore) Remove(ctx context.Context, id int64) error {
 // mapRowToPolicy maps a scan function to a domain.Policy struct.
 func mapRowToPolicy(scan query.ScanFunc) (domain.Policy, error) {
 	var policy domain.Policy
-	if err := scan(&policy.ID, &policy.Name, &policy.Version, &policy.CreatedAt, &policy.UpdatedAt); err != nil {
+	if err := scan(&policy.ID, &policy.Name, &policy.Type, &policy.Version, &policy.CreatedAt, &policy.UpdatedAt); err != nil {
 		return domain.Policy{}, err
 	}
 

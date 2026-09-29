@@ -17,7 +17,7 @@ func TestPolicyStore_Create_WithValidName_CreatesPolicy(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
-	createdPolicy, err := store.Create(ctx, name)
+	createdPolicy, err := store.Create(ctx, name, domain.WhitelistPolicyType)
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -29,6 +29,10 @@ func TestPolicyStore_Create_WithValidName_CreatesPolicy(t *testing.T) {
 
 	if createdPolicy.Name != name {
 		t.Errorf("expected name %q, got %q", name, createdPolicy.Name)
+	}
+
+	if createdPolicy.Type != domain.WhitelistPolicyType {
+		t.Errorf("expected type %q, got %q", domain.WhitelistPolicyType, createdPolicy.Type)
 	}
 
 	if createdPolicy.Version != 1 {
@@ -48,11 +52,11 @@ func TestPolicyStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
-	if _, err := store.Create(ctx, name); err != nil {
+	if _, err := store.Create(ctx, name, domain.WhitelistPolicyType); err != nil {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
-	_, err := store.Create(ctx, name)
+	_, err := store.Create(ctx, name, domain.WhitelistPolicyType)
 	if err == nil {
 		t.Error("expected an error for unique constraint violation, got nil")
 	}
@@ -64,7 +68,7 @@ func TestPolicyStore_Create_WithDuplicateName_RejectsCreation(t *testing.T) {
 
 func TestPolicyStore_GetByID_WithExistingID_ReturnsPolicy(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
-	seededPolicy, _ := store.Create(ctx, "Test Policy")
+	seededPolicy, _ := store.Create(ctx, "Test Policy", domain.WhitelistPolicyType)
 
 	policy, err := store.GetByID(ctx, seededPolicy.ID)
 
@@ -76,6 +80,9 @@ func TestPolicyStore_GetByID_WithExistingID_ReturnsPolicy(t *testing.T) {
 	}
 	if policy.Name != seededPolicy.Name {
 		t.Errorf("expected name %q, got %q", seededPolicy.Name, policy.Name)
+	}
+	if policy.Type != seededPolicy.Type {
+		t.Errorf("expected type %q, got %q", seededPolicy.Type, policy.Type)
 	}
 	if policy.Version != seededPolicy.Version {
 		t.Errorf("expected version %d, got %d", seededPolicy.Version, policy.Version)
@@ -98,7 +105,7 @@ func TestPolicyStore_GetByID_WithInexistentID_ReturnsNil(t *testing.T) {
 func TestPolicyStore_GetByName_WithExistingName_ReturnsPolicy(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
-	if _, err := store.Create(ctx, name); err != nil {
+	if _, err := store.Create(ctx, name, domain.WhitelistPolicyType); err != nil {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
@@ -136,7 +143,7 @@ func TestPolicyStore_Exists_WithExistingPolicy_ReturnsTrue(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	name := "Test Policy"
 
-	if _, err := store.Create(ctx, name); err != nil {
+	if _, err := store.Create(ctx, name, domain.WhitelistPolicyType); err != nil {
 		t.Fatalf("failed to seed policy: %v", err)
 	}
 
@@ -169,7 +176,7 @@ func TestPolicyStore_Exists_WithInexistentPolicy_ReturnsFalse(t *testing.T) {
 
 func TestPolicyStore_Update_WithValidData_UpdatesPolicy(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
-	seededPolicy, _ := store.Create(ctx, "Old Name")
+	seededPolicy, _ := store.Create(ctx, "Old Name", domain.WhitelistPolicyType)
 
 	if seededPolicy.UpdatedAt.IsZero() {
 		t.Fatal("expected seeded policy to have updated_at timestamp")
@@ -219,7 +226,7 @@ func TestPolicyStore_List_WithSeededPolicies_ReturnsAll(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
 	names := []string{"Policy A", "Policy B", "Policy C"}
 	for _, name := range names {
-		if _, err := store.Create(ctx, name); err != nil {
+		if _, err := store.Create(ctx, name, domain.WhitelistPolicyType); err != nil {
 			t.Fatalf("failed to seed policy: %v", err)
 		}
 	}
@@ -256,7 +263,7 @@ func TestPolicyStore_List_WithEmptyDB_ReturnsEmptyList(t *testing.T) {
 
 func TestPolicyStore_Remove_WithExistingPolicy_DeletesPolicy(t *testing.T) {
 	ctx, store := arrangeStoreTest(t, store.NewPolicyStore)
-	seededPolicy, _ := store.Create(ctx, "Test Policy")
+	seededPolicy, _ := store.Create(ctx, "Test Policy", domain.WhitelistPolicyType)
 
 	err := store.Remove(ctx, seededPolicy.ID)
 
@@ -267,6 +274,35 @@ func TestPolicyStore_Remove_WithExistingPolicy_DeletesPolicy(t *testing.T) {
 	policy, _ := store.GetByID(ctx, seededPolicy.ID)
 	if policy != nil {
 		t.Error("expected policy to be removed from DB")
+	}
+}
+
+func TestPolicyStore_Remove_WithLinkedRules_CascadesRuleRemoval(t *testing.T) {
+	ctx, db := arrangeStoreDB(t)
+	policies := store.NewPolicyStore(db)
+	rules := store.NewRuleStore(db)
+
+	seededPolicy, err := policies.Create(ctx, "Test Policy", domain.WhitelistPolicyType)
+	if err != nil {
+		t.Fatalf("failed to seed policy: %v", err)
+	}
+
+	for _, value := range []string{"first.com", "second.com"} {
+		seedRule(t, ctx, rules, domain.NewDomainRule(value).WithPolicy(seededPolicy.ID).Build())
+	}
+
+	if err := policies.Remove(ctx, seededPolicy.ID); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	filter := domain.NewRuleFilter().WithPolicyID(seededPolicy.ID).Build()
+	remaining, err := rules.List(ctx, filter)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(remaining) != 0 {
+		t.Errorf("expected linked rules to be cascade-removed, got %d remaining", len(remaining))
 	}
 }
 

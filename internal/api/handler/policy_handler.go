@@ -55,6 +55,8 @@ func (handler *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
 			errors.ErrPolicyNameRequired:      http.StatusBadRequest,
+			errors.ErrPolicyTypeRequired:      http.StatusBadRequest,
+			errors.ErrInvalidPolicyType:       http.StatusBadRequest,
 			errors.ErrPolicyNameAlreadyExists: http.StatusConflict,
 		})
 

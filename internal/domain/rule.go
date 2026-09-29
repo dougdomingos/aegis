@@ -13,21 +13,12 @@ import (
 // RuleType represents the rule classification type.
 type RuleType string
 
-// RuleAction represents the action to enforce when a rule matches.
-type RuleAction string
-
 const (
 	// DomainRuleType identifies domain-based filtering rules.
 	DomainRuleType RuleType = "DOMAIN"
 
 	// IPRuleType identifies IP address or CIDR-based filtering rules.
 	IPRuleType RuleType = "IP"
-
-	// AllowAction permits matching network traffic.
-	AllowAction RuleAction = "ALLOW"
-
-	// DenyAction blocks matching network traffic.
-	DenyAction RuleAction = "DENY"
 )
 
 // domainRegex
@@ -39,15 +30,16 @@ type Rule struct {
 	// ID is the unique identifier of the rule, assigned at creation.
 	ID int64
 
+	// PolicyID is the identifier of the policy that owns this rule. A rule
+	// only exists within a policy.
+	PolicyID int64
+
 	// Type is the immutable rule classification (e.g., IP, DOMAIN).
 	Type RuleType
 
 	// Value is the targeted resource (e.g., IP address, CIDR, domain name). Its
 	// format must match the specified RuleType of its instance.
 	Value string
-
-	// Action is the enforcement result applied when matched (e.g., ALLOW, DENY).
-	Action RuleAction
 
 	// (Optional) Protocol is the targeted network protocol (e.g., TCP, UDP). Only
 	// applicable for IP-based rules; defaults to nil if not provided.
@@ -65,7 +57,6 @@ type Rule struct {
 // fields will be applied.
 type RulePatch struct {
 	Value    *string
-	Action   *RuleAction
 	Protocol *string
 	Port     *int
 }
@@ -75,10 +66,6 @@ type RulePatch struct {
 func (r *Rule) Patch(patch RulePatch) {
 	if patch.Value != nil {
 		r.Value = *patch.Value
-	}
-
-	if patch.Action != nil {
-		r.Action = *patch.Action
 	}
 
 	if patch.Protocol != nil {
@@ -93,7 +80,7 @@ func (r *Rule) Patch(patch RulePatch) {
 // IsEqual checks whether the provided rule instance has the same values as the
 // caller.
 func (r *Rule) IsEqual(rule *Rule) bool {
-	if r.Type != rule.Type || r.Value != rule.Value || r.Action != rule.Action {
+	if r.Type != rule.Type || r.Value != rule.Value {
 		return false
 	} else if (r.Protocol == nil) != (rule.Protocol == nil) || (r.Port == nil) != (rule.Port == nil) {
 		return false
@@ -106,13 +93,14 @@ func (r *Rule) IsEqual(rule *Rule) bool {
 	return true
 }
 
+// Validate checks whether the rule instance holds a valid configuration.
 func (r *Rule) Validate() error {
-	if strings.TrimSpace(string(r.Type)) == "" {
-		return errors.ErrRuleTypeRequired
+	if r.PolicyID <= 0 {
+		return errors.ErrRulePolicyRequired
 	}
 
-	if strings.TrimSpace(string(r.Action)) == "" {
-		return errors.ErrRuleActionRequired
+	if strings.TrimSpace(string(r.Type)) == "" {
+		return errors.ErrRuleTypeRequired
 	}
 
 	if strings.TrimSpace(r.Value) == "" {
