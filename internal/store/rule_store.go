@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	queryCreateRule     = "INSERT INTO rules (type, value, action, protocol, port) VALUES (?,?,?,?,?)"
-	queryGetRuleByID    = "SELECT * FROM rules WHERE id = ?"
-	queryUpdateRuleByID = "UPDATE rules SET value = ?, action = ?, protocol = ?, port = ? WHERE id = ?"
+	queryCreateRule     = "INSERT INTO rules (policy_id, type, value, protocol, port) VALUES (?,?,?,?,?)"
+	queryGetRuleByID    = "SELECT id, policy_id, type, value, protocol, port, created_at FROM rules WHERE id = ?"
+	queryUpdateRuleByID = "UPDATE rules SET value = ?, protocol = ?, port = ? WHERE id = ?"
 	queryDeleteRuleByID = "DELETE FROM rules WHERE id = ?"
+	queryColumnsRule    = "SELECT id, policy_id, type, value, protocol, port, created_at FROM rules"
 )
 
 // RuleStore manages all database-related operations over rules.
@@ -37,7 +38,7 @@ func (store *RuleStore) Create(ctx context.Context, rule domain.Rule) (*domain.R
 	}
 
 	err := store.executor.WithTx(ctx, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, queryCreateRule, rule.Type, rule.Value, rule.Action, rule.Protocol, rule.Port)
+		result, err := tx.ExecContext(ctx, queryCreateRule, rule.PolicyID, rule.Type, rule.Value, rule.Protocol, rule.Port)
 		if err != nil {
 			return fmt.Errorf("failed to create rule: %w", err)
 		}
@@ -71,16 +72,14 @@ func (store *RuleStore) GetByID(ctx context.Context, id int64) (*domain.Rule, er
 func (store *RuleStore) List(ctx context.Context, filter domain.RuleFilter) ([]domain.Rule, error) {
 	var args []any
 	var conditions []string
-	searchQuery := "SELECT * FROM rules"
+	searchQuery := queryColumnsRule
+
+	conditions = append(conditions, "policy_id = ?")
+	args = append(args, filter.PolicyID)
 
 	if filter.Type != nil {
 		conditions = append(conditions, "type = ?")
 		args = append(args, *filter.Type)
-	}
-
-	if filter.Action != nil {
-		conditions = append(conditions, "action = ?")
-		args = append(args, *filter.Action)
 	}
 
 	if filter.Value != nil {
@@ -88,9 +87,7 @@ func (store *RuleStore) List(ctx context.Context, filter domain.RuleFilter) ([]d
 		args = append(args, fmt.Sprintf("%%%s%%", *filter.Value))
 	}
 
-	if len(conditions) > 0 {
-		searchQuery += " WHERE " + strings.Join(conditions, " AND ")
-	}
+	searchQuery += " WHERE " + strings.Join(conditions, " AND ")
 
 	return store.executor.QueryMany(ctx, searchQuery, args...)
 }
@@ -104,7 +101,6 @@ func (store *RuleStore) Update(ctx context.Context, rule domain.Rule) (*domain.R
 		ctx,
 		queryUpdateRuleByID,
 		rule.Value,
-		rule.Action,
 		rule.Protocol,
 		rule.Port,
 		rule.ID)
@@ -149,9 +145,9 @@ func mapRowToRule(scan query.ScanFunc) (domain.Rule, error) {
 	var rule domain.Rule
 	if err := scan(
 		&rule.ID,
+		&rule.PolicyID,
 		&rule.Type,
 		&rule.Value,
-		&rule.Action,
 		&rule.Protocol,
 		&rule.Port,
 		&rule.CreatedAt); err != nil {
@@ -163,12 +159,12 @@ func mapRowToRule(scan query.ScanFunc) (domain.Rule, error) {
 }
 
 func validateRuleConstraints(rule domain.Rule) error {
-	if rule.Type == "" {
-		return fmt.Errorf("rule type must be provided")
+	if rule.PolicyID <= 0 {
+		return fmt.Errorf("rule must belong to a policy")
 	}
 
-	if rule.Action == "" {
-		return fmt.Errorf("rule action must be provided")
+	if rule.Type == "" {
+		return fmt.Errorf("rule type must be provided")
 	}
 
 	if rule.Value == "" {
