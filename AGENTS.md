@@ -66,9 +66,23 @@ assigned task:
 # Install required dependencies and tools
 make init
 
-# Execute tests with coverage profile
-make test-coverage
+# Run all tests, reporting errors only
+make tests
+
+# Run all tests and compute coverage
+make coverage
+
+# Run all tests and yield an HTML coverage report
+make test-report
+
+# List every available target
+make help
 ```
+
+> **Note:** `tests`, `coverage`, and `test-report` only exercise the packages
+> listed in the `TEST_PACKAGES` variable of the `Makefile`, which keeps the
+> untested packages out of the coverage profile. Extend that variable when a new
+> package gains tests.
 
 ### 3.1. Git Hooks (Lefthook)
 
