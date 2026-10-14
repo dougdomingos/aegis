@@ -4,6 +4,9 @@
 # untested packages out of the coverage profile.
 TEST_PACKAGES = ./internal/store \
 	./internal/service \
+	./internal/config \
+	./internal/auth \
+	./internal/api \
 	./internal/infra/migrations \
 	./internal/infra/query \
 	./internal/api/handler \
