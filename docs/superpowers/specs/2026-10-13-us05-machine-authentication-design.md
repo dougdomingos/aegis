@@ -120,27 +120,29 @@ Authentication nonces are **not** persisted. They are held in memory only (see
 
 ## 6. Configuration
 
-Server configuration adds a machine source list and the shared secrets:
+Server configuration adds the shared secrets and the machine source list. The
+lab key and the machine list are read from files referenced by path so that
+secret material and the registry are not stored in environment variables.
 
 ```yaml
-lab_key: "<64 hex characters encoding 32 bytes>"
+lab_key: /etc/aegis/lab.key        # file containing the hex-encoded 32-byte key
 session_secret: "<hmac signing secret>"
 session_ttl: 24h
-machines:
-  - ip: "10.0.1.11"
-    name: "lcc1-011"
-  - ip: "10.0.1.12"
-    name: "lcc1-012"
+machines: /etc/aegis/machines.csv   # CSV file with an "ip,name" header row
 ```
 
-- `lab_key` is the shared symmetric HMAC key used to verify authentication
-  challenges. It is hex-encoded and must decode to exactly 32 bytes. It is
+- `AEGIS_LAB_KEY` is the path to a file holding the shared symmetric HMAC key
+  used to verify authentication challenges. The file contains a hex-encoded
+  string that must decode to exactly 32 bytes (64 hex characters). The key is
   **never transmitted** to or presented by a machine.
-- `session_secret` signs issued session tokens. Both secrets are required and
-  must never be logged.
-- `machines` is the accepted-sources list. Names follow the `lccX-YYY` pattern
+- `AEGIS_SESSION_SECRET` signs issued session tokens. Both secrets are required
+  and must never be logged.
+- `AEGIS_MACHINES` is the path to a CSV file with an `ip,name` header row
+  followed by one machine per line. Names follow the `lccX-YYY` pattern
   (lab room + machine index) so they are deterministic from the IP mapping.
 - Configuration is passed into `NewRouter` so tests can inject values.
+
+An example is provided in `.env.example`.
 
 ## 7. Service Layer
 

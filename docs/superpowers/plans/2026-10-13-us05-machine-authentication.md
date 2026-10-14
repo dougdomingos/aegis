@@ -259,45 +259,52 @@ git commit -m "feat(auth): add shared canonical payload and HMAC primitives"
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `config.Machine{ IP, Name string }`, `config.Config{ LabKey []byte; SessionSecret string; SessionTTL time.Duration; Machines []Machine }`, `config.Load() (*Config, error)`.
+- Create: `.env.example`.
 
 - [ ] **Step 1: Write the failing config tests**
 
-Update `internal/config/config_test.go` (package `config_test`). Use `t.Setenv`. Replace `AEGIS_LAB_TOKEN` with a 64-hex-char `AEGIS_LAB_KEY`. Cases:
+Update `internal/config/config_test.go` (package `config_test`). Use `t.Setenv` to point `AEGIS_LAB_KEY` and `AEGIS_MACHINES` at temporary files created with `t.TempDir()` + `os.WriteFile`. The key file holds the 64 hex characters (plus a trailing newline); the machines file holds an `ip,name` header plus rows. Cases:
 
-- `TestConfig_Load_WithValidEnv_ReturnsParsedConfig` — set `AEGIS_LAB_KEY` (64 hex chars), `AEGIS_SESSION_SECRET`, `AEGIS_MACHINES`; assert `LabKey` decodes to the 32 bytes, secret, TTL `24h`, and two machines.
+- `TestConfig_Load_WithValidEnv_ReturnsParsedConfig` — valid key + machines files; assert `LabKey` decodes to 32 bytes, secret, TTL `24h`, and two machines.
 - `TestConfig_Load_WithCustomTTL_ReturnsConfiguredTTL`
 - `TestConfig_Load_WithoutLabKey_ReturnsError`
-- `TestConfig_Load_WithNonHexLabKey_ReturnsError` — `"not-hex"`.
-- `TestConfig_Load_WithWrongSizeLabKey_ReturnsError` — 16 bytes hex.
+- `TestConfig_Load_WithMissingLabKeyFile_ReturnsError`
+- `TestConfig_Load_WithNonHexLabKeyFile_ReturnsError`
+- `TestConfig_Load_WithWrongSizeLabKeyFile_ReturnsError`
 - `TestConfig_Load_WithoutSessionSecret_ReturnsError`
 - `TestConfig_Load_WithInvalidTTL_ReturnsError`
-- `TestConfig_Load_WithMalformedMachineEntry_ReturnsError`
+- `TestConfig_Load_WithMissingMachinesFile_ReturnsError`
+- `TestConfig_Load_WithWrongHeaderMachinesFile_ReturnsError` — header `name,ip`.
 - `TestConfig_Load_WithInvalidMachineIP_ReturnsError`
-- `TestConfig_Load_WithoutMachines_LogsWarning`
+- `TestConfig_Load_WithEmptyMachineName_ReturnsError`
+- `TestConfig_Load_WithoutMachinesFile_LogsWarning`
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `go test ./internal/config -v`
-Expected: FAIL — `LabKey` / `AEGIS_LAB_KEY` undefined.
+Expected: FAIL — file parsing not implemented.
 
 - [ ] **Step 3: Implement `internal/config/config.go`**
 
-- Add `envLabKey = "AEGIS_LAB_KEY"` and a `labKeyLength = 32` constant; remove `envLabToken`.
-- Replace `Config.LabToken string` with `Config.LabKey []byte`.
-- Add `parseLabKey(raw string) ([]byte, error)`: trim; empty → `fmt.Errorf("%s is required", envLabKey)`; `hex.DecodeString` failure → `fmt.Errorf("invalid %s value %q: must be hex-encoded", envLabKey, trimmed)`; `len != 32` → `fmt.Errorf("invalid %s value: must decode to exactly %d bytes", envLabKey, labKeyLength)`.
-- Keep `parseSessionTTL` and `parseMachines` unchanged.
-- `Load` builds `Config{LabKey, SessionSecret, SessionTTL, Machines}`.
+- `AEGIS_LAB_KEY` holds a **file path**. Add `parseLabKey(path string)`: empty → `fmt.Errorf("%s is required", envLabKey)`; `os.ReadFile` error → wrapped `failed to read key file`; `hex.DecodeString(strings.TrimSpace(...))` error → `key file must be hex-encoded`; `len != 32` → `key file must decode to exactly 32 bytes`.
+- `AEGIS_MACHINES` holds a **CSV file path**. Add `parseMachines(path string)`: empty → `nil, nil`; `os.Open` error → wrapped `failed to open machines file`; `csv.NewReader(file).ReadAll()` error → wrapped `failed to parse machines file`; empty file → error; first row joined must equal `ip,name` else error; each subsequent row must have 2 fields, a valid IP, and a non-empty name.
+- Keep `parseSessionTTL` unchanged. `Load` builds `Config{LabKey, SessionSecret, SessionTTL, Machines}`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Create `.env.example`**
+
+Document `AEGIS_LAB_KEY` (key file path), `AEGIS_SESSION_SECRET`,
+`AEGIS_SESSION_TTL`, and `AEGIS_MACHINES` (CSV file path) with comments.
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/config -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit (only if authorized)**
+- [ ] **Step 6: Commit (only if authorized)**
 
 ```bash
-git add internal/config/config.go internal/config/config_test.go
-git commit -m "feat(config): load 32-byte lab key, session secret, and machine sources"
+git add internal/config/config.go internal/config/config_test.go .env.example
+git commit -m "feat(config): load lab key and machine registry from files"
 ```
 
 ---
