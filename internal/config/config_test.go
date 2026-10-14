@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,10 +16,16 @@ import (
 // validLabKey is a 32-byte key encoded as 64 hexadecimal characters.
 const validLabKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
+// labKeyFile is the contents of a valid lab key file.
+const labKeyFile = validLabKey + "\n"
+
+// machinesFile is the contents of a valid machines CSV file.
+const machinesFile = "ip,name\n10.0.1.11,lcc1-011\n10.0.1.12,lcc1-012\n"
+
 func TestConfig_Load_WithValidEnv_ReturnsParsedConfig(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", "10.0.1.11=lcc1-011,10.0.1.12=lcc1-012")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
 
 	cfg, err := config.Load()
 
@@ -53,7 +60,7 @@ func TestConfig_Load_WithValidEnv_ReturnsParsedConfig(t *testing.T) {
 }
 
 func TestConfig_Load_WithCustomTTL_ReturnsConfiguredTTL(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 	t.Setenv("AEGIS_SESSION_TTL", "1h")
 
@@ -78,30 +85,41 @@ func TestConfig_Load_WithoutLabKey_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestConfig_Load_WithNonHexLabKey_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", "not-hex")
+func TestConfig_Load_WithMissingLabKeyFile_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", filepath.Join(t.TempDir(), "does-not-exist.key"))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 
 	_, err := config.Load()
 
 	if err == nil {
-		t.Error("expected an error for a non-hex lab key, got nil")
+		t.Error("expected an error for a missing lab key file, got nil")
 	}
 }
 
-func TestConfig_Load_WithWrongSizeLabKey_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", "0123456789abcdef")
+func TestConfig_Load_WithNonHexLabKeyFile_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, "not-hex\n"))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 
 	_, err := config.Load()
 
 	if err == nil {
-		t.Error("expected an error for a lab key that is not 32 bytes, got nil")
+		t.Error("expected an error for a non-hex lab key file, got nil")
+	}
+}
+
+func TestConfig_Load_WithWrongSizeLabKeyFile_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, "0123456789abcdef\n"))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+
+	_, err := config.Load()
+
+	if err == nil {
+		t.Error("expected an error for a lab key file that is not 32 bytes, got nil")
 	}
 }
 
 func TestConfig_Load_WithoutSessionSecret_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 
 	_, err := config.Load()
 
@@ -111,7 +129,7 @@ func TestConfig_Load_WithoutSessionSecret_ReturnsError(t *testing.T) {
 }
 
 func TestConfig_Load_WithInvalidTTL_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 	t.Setenv("AEGIS_SESSION_TTL", "soon")
 
@@ -122,22 +140,34 @@ func TestConfig_Load_WithInvalidTTL_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestConfig_Load_WithMalformedMachineEntry_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+func TestConfig_Load_WithMissingMachinesFile_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", "10.0.1.11")
+	t.Setenv("AEGIS_MACHINES", filepath.Join(t.TempDir(), "does-not-exist.csv"))
 
 	_, err := config.Load()
 
 	if err == nil {
-		t.Error("expected an error for malformed machine entry, got nil")
+		t.Error("expected an error for a missing machines file, got nil")
+	}
+}
+
+func TestConfig_Load_WithWrongHeaderMachinesFile_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "name,ip\nlcc1-011,10.0.1.11\n"))
+
+	_, err := config.Load()
+
+	if err == nil {
+		t.Error("expected an error for a machines file with the wrong header, got nil")
 	}
 }
 
 func TestConfig_Load_WithInvalidMachineIP_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", "not-an-ip=lcc1-011")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "ip,name\nnot-an-ip,lcc1-011\n"))
 
 	_, err := config.Load()
 
@@ -146,8 +176,20 @@ func TestConfig_Load_WithInvalidMachineIP_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestConfig_Load_WithoutMachines_LogsWarning(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", validLabKey)
+func TestConfig_Load_WithEmptyMachineName_ReturnsError(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "ip,name\n10.0.1.11,\n"))
+
+	_, err := config.Load()
+
+	if err == nil {
+		t.Error("expected an error for an empty machine name, got nil")
+	}
+}
+
+func TestConfig_Load_WithoutMachinesFile_LogsWarning(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 
 	var buf bytes.Buffer
@@ -164,4 +206,16 @@ func TestConfig_Load_WithoutMachines_LogsWarning(t *testing.T) {
 	if !strings.Contains(buf.String(), "no machines configured") {
 		t.Errorf("expected warning about no machines, got %q", buf.String())
 	}
+}
+
+// writeTempFile writes content to a temporary file and returns its path.
+func writeTempFile(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+
+	return path
 }

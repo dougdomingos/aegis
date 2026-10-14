@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/csv"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -16,7 +17,8 @@ const (
 	// defaultSessionTTL is the default lifetime of an issued session token.
 	defaultSessionTTL = "24h"
 
-	// envLabKey is the environment variable holding the shared lab key.
+	// envLabKey is the environment variable holding the path to the file
+	// containing the shared lab key.
 	envLabKey = "AEGIS_LAB_KEY"
 
 	// envSessionSecret is the environment variable holding the HMAC signing
@@ -27,12 +29,15 @@ const (
 	// token lifetime.
 	envSessionTTL = "AEGIS_SESSION_TTL"
 
-	// envMachines is the environment variable listing the accepted machine
-	// sources as comma-separated ip=name pairs.
+	// envMachines is the environment variable holding the path to the CSV file
+	// listing the accepted machine sources.
 	envMachines = "AEGIS_MACHINES"
 
 	// labKeyLength is the required length, in bytes, of the shared lab key.
 	labKeyLength = 32
+
+	// machinesHeader is the expected header row of the machines CSV file.
+	machinesHeader = "ip,name"
 )
 
 // Machine declares a single accepted machine source.
@@ -95,21 +100,26 @@ func Load() (*Config, error) {
 	}, nil
 }
 
-// parseLabKey decodes the shared lab key from its hexadecimal representation,
-// requiring exactly 32 bytes.
-func parseLabKey(raw string) ([]byte, error) {
-	trimmed := strings.TrimSpace(raw)
+// parseLabKey reads the shared lab key from the file at the provided path,
+// requiring a hex-encoded value that decodes to exactly 32 bytes.
+func parseLabKey(path string) ([]byte, error) {
+	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%s is required", envLabKey)
 	}
 
-	key, err := hex.DecodeString(trimmed)
+	data, err := os.ReadFile(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s value %q: must be hex-encoded", envLabKey, trimmed)
+		return nil, fmt.Errorf("invalid %s: failed to read key file: %w", envLabKey, err)
+	}
+
+	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: key file must be hex-encoded: %w", envLabKey, err)
 	}
 
 	if len(key) != labKeyLength {
-		return nil, fmt.Errorf("invalid %s value: must decode to exactly %d bytes", envLabKey, labKeyLength)
+		return nil, fmt.Errorf("invalid %s: key file must decode to exactly %d bytes", envLabKey, labKeyLength)
 	}
 
 	return key, nil
@@ -135,30 +145,51 @@ func parseSessionTTL(raw string) (time.Duration, error) {
 	return ttl, nil
 }
 
-// parseMachines parses the comma-separated list of ip=name machine entries.
-func parseMachines(raw string) ([]Machine, error) {
-	trimmed := strings.TrimSpace(raw)
+// parseMachines reads the accepted machine sources from the CSV file at the
+// provided path. The file must have an "ip,name" header row followed by one
+// machine per line.
+func parseMachines(path string) ([]Machine, error) {
+	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return nil, nil
 	}
 
+	file, err := os.Open(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: failed to open machines file: %w", envMachines, err)
+	}
+	defer file.Close()
+
+	records, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s: failed to parse machines file: %w", envMachines, err)
+	}
+
+	if len(records) == 0 {
+		return nil, fmt.Errorf("invalid %s: machines file is empty", envMachines)
+	}
+
+	header := strings.Join(records[0], ",")
+	if header != machinesHeader {
+		return nil, fmt.Errorf("invalid %s: header must be %q", envMachines, machinesHeader)
+	}
+
 	var machines []Machine
 
-	for entry := range strings.SplitSeq(trimmed, ",") {
-		parts := strings.Split(strings.TrimSpace(entry), "=")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid %s entry %q: expected ip=name", envMachines, entry)
+	for _, record := range records[1:] {
+		if len(record) != 2 {
+			return nil, fmt.Errorf("invalid %s: each row must have 2 fields", envMachines)
 		}
 
-		ip := strings.TrimSpace(parts[0])
-		name := strings.TrimSpace(parts[1])
+		ip := strings.TrimSpace(record[0])
+		name := strings.TrimSpace(record[1])
 
 		if net.ParseIP(ip) == nil {
-			return nil, fmt.Errorf("invalid %s entry %q: %q is not a valid IP address", envMachines, entry, ip)
+			return nil, fmt.Errorf("invalid %s: %q is not a valid IP address", envMachines, ip)
 		}
 
 		if name == "" {
-			return nil, fmt.Errorf("invalid %s entry %q: empty name", envMachines, entry)
+			return nil, fmt.Errorf("invalid %s: empty name", envMachines)
 		}
 
 		machines = append(machines, Machine{IP: ip, Name: name})
