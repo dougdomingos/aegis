@@ -27,16 +27,17 @@ using a two-tier architecture:
 
 ### 2.1. Directory Layout
 
-| Path                | Responsibility                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `cmd/`              | Entrypoints (e.g., `cmd/orchestrator/main.go`).                                                               |
-| `internal/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes. |
-| `internal/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                           |
-| `internal/errors/`  | Package-level sentinel errors only.                                                                           |
-| `internal/schemas/` | Request/response DTOs used at the API boundary.                                                               |
-| `internal/service/` | Business logic orchestration; depends on store interfaces.                                                    |
-| `internal/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                               |
-| `internal/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities). |
+| Path                | Responsibility                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `cmd/`              | Entrypoints (e.g., `cmd/orchestrator/main.go`).                                                                          |
+| `internal/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes.   |
+| `internal/auth/`    | Shared authentication primitives (canonical payload, HMAC sign/verify) used by the Orchestrator and the future Sentinel. |
+| `internal/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                                      |
+| `internal/errors/`  | Package-level sentinel errors only.                                                                                      |
+| `internal/schemas/` | Request/response DTOs used at the API boundary.                                                                          |
+| `internal/service/` | Business logic orchestration; depends on store interfaces.                                                               |
+| `internal/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                                          |
+| `internal/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities).            |
 
 ### 2.2. Layers and Dependency Flow
 
