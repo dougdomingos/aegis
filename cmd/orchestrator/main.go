@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dougdomingos.com/aegis/internal/api"
+	"dougdomingos.com/aegis/internal/config"
 	"dougdomingos.com/aegis/internal/infra"
 )
 
@@ -26,9 +27,19 @@ func main() {
 	}
 	defer db.Close()
 
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	router, err := api.NewRouter(db, cfg)
+	if err != nil {
+		log.Fatalf("failed to initialize router: %v", err)
+	}
+
 	srv := &http.Server{
 		Addr:              serverAddress,
-		Handler:           api.NewRouter(db),
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
