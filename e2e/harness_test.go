@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/netip"
 	"os"
@@ -235,4 +236,200 @@ func withStaticIP(networkName, ip string) testcontainers.CustomizeRequestOption 
 			settings[networkName].IPAMConfig = &mobynetwork.EndpointIPAMConfig{IPv4Address: addr}
 		},
 	)
+}
+
+// gracefulStopTimeout bounds how long Docker waits for a SIGTERM graceful exit
+// before escalating to SIGKILL.
+const gracefulStopTimeout = 10 * time.Second
+
+// exitGraceTimeout bounds how long an exited container may take to be observed
+// as stopped after its process ends.
+const exitGraceTimeout = 30 * time.Second
+
+// sentinelHandle is a running Sentinel container under test.
+type sentinelHandle struct {
+	container testcontainers.Container
+	ip        string
+	name      string
+}
+
+// startSentinel boots the real Sentinel container with the planned static IP
+// at index, its lab key and JSON configuration injected in-memory, pointing at
+// the Orchestrator's planned address. No wait strategy runs: the process may
+// exit on purpose.
+func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string) *sentinelHandle {
+	t.Helper()
+
+	config := fmt.Sprintf(`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q}`,
+		orchestratorIP, labKeyPath)
+
+	c, err := testcontainers.Run(context.Background(), e2eImage,
+		testcontainers.WithEntrypoint("/usr/local/bin/aegis-sentinel", "--config", sentinelConfigPath),
+		testcontainers.WithFiles(
+			injectedFile(labKeyPath, labKeyHex+"\n"),
+			injectedFile(sentinelConfigPath, config),
+		),
+		tcnetwork.WithNetwork(nil, f.network),
+		withStaticIP(f.network.Name, sentinelIP(index)),
+	)
+	if err != nil {
+		t.Fatalf("failed to start the sentinel at %s: %v", sentinelIP(index), err)
+	}
+
+	t.Cleanup(func() {
+		if err := c.Terminate(context.Background()); err != nil {
+			t.Errorf("failed to terminate the sentinel at %s: %v", sentinelIP(index), err)
+		}
+	})
+
+	return &sentinelHandle{container: c, ip: sentinelIP(index), name: machineName(index)}
+}
+
+// logs returns the full captured output of the Sentinel container, while it
+// runs and after it exits.
+func (h *sentinelHandle) logs(t *testing.T) string {
+	t.Helper()
+
+	reader, err := h.container.Logs(context.Background())
+	if err != nil {
+		t.Fatalf("failed to read the logs of the sentinel at %s: %v", h.ip, err)
+	}
+	defer reader.Close()
+
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read the logs of the sentinel at %s: %v", h.ip, err)
+	}
+
+	return string(out)
+}
+
+// waitForLog blocks until the Sentinel emits a record containing the provided
+// text, failing the test when it does not within the timeout.
+func (h *sentinelHandle) waitForLog(t *testing.T, needle string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(h.logs(t), needle) {
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("the sentinel at %s did not log %q within %v;\nlogs:\n%s",
+		h.ip, needle, timeout, h.logs(t))
+}
+
+// stopAndExitCode stops the Sentinel the way Docker does — SIGTERM, escalating
+// to SIGKILL after the graceful timeout — and returns its exit code.
+func (h *sentinelHandle) stopAndExitCode(t *testing.T) int {
+	t.Helper()
+
+	timeout := gracefulStopTimeout
+	if err := h.container.Stop(context.Background(), &timeout); err != nil {
+		t.Fatalf("failed to stop the sentinel at %s: %v", h.ip, err)
+	}
+
+	return h.exitCode(t)
+}
+
+// exitCode blocks until the container is observed as stopped and returns the
+// exit code reported by the runtime, independent of the process state on the
+// host.
+func (h *sentinelHandle) exitCode(t *testing.T) int {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(exitGraceTimeout)
+	for time.Now().Before(deadline) {
+		state, err := h.container.State(ctx)
+		if err != nil {
+			t.Fatalf("failed to inspect the sentinel at %s: %v", h.ip, err)
+		}
+
+		if !state.Running {
+			info, err := h.container.Inspect(ctx)
+			if err != nil {
+				t.Fatalf("failed to inspect the sentinel at %s: %v", h.ip, err)
+			}
+
+			return info.State.ExitCode
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("the sentinel at %s did not stop within %v;\nlogs:\n%s",
+		h.ip, exitGraceTimeout, h.logs(t))
+
+	return 0
+}
+
+// waitForConnected blocks until every provided machine IP reports CONNECTED in
+// the registry, reporting the full status map on timeout.
+func (f *fleet) waitForConnected(t *testing.T, ips []string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		statuses := f.statuses(t)
+
+		connected := true
+		for _, ip := range ips {
+			if statuses[ip] != "CONNECTED" {
+				connected = false
+			}
+		}
+
+		if connected {
+			return
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("the fleet did not reach CONNECTED within %v; statuses: %v", timeout, f.statuses(t))
+}
+
+// statuses maps every registry machine IP to its current status string.
+func (f *fleet) statuses(t *testing.T) map[string]string {
+	t.Helper()
+
+	got := f.machines(t)
+
+	statuses := make(map[string]string, len(got))
+	for ip, machine := range got {
+		statuses[ip] = machine.Status
+	}
+
+	return statuses
+}
+
+// secretNeedles are the secret materials that must never reach any log output.
+var secretNeedles = []string{validLabKeyHex, wrongLabKeyHex, sessionSecret}
+
+// secretHits returns the needles present in the provided output.
+func secretHits(output string) []string {
+	var hits []string
+
+	for _, needle := range secretNeedles {
+		if strings.Contains(output, needle) {
+			hits = append(hits, needle)
+		}
+	}
+
+	return hits
+}
+
+// assertNoSecrets fails the test when any secret material appears in the
+// provided output. The reported message names only the hit count, so the
+// assertion failure itself never leaks a secret.
+func assertNoSecrets(t *testing.T, output string) {
+	t.Helper()
+
+	if hits := secretHits(output); len(hits) > 0 {
+		t.Errorf("secret material leaked into the provided output: %d hit(s)", len(hits))
+	}
 }
