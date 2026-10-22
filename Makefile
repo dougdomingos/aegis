@@ -1,4 +1,4 @@
-.PHONY: init tests coverage test-report help
+.PHONY: init tests coverage test-report build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
@@ -18,6 +18,11 @@ init: ## Install utility tools for development lifecycle
 	go install github.com/dougdomingos/test-prettify@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	lefthook install
+
+build: ## Build both binaries into ./bin
+	@mkdir -p bin
+	@go build -o bin/aegis-orchestrator ./cmd/orchestrator
+	@go build -o bin/aegis-sentinel ./cmd/sentinel
 
 tests: ## Run all tests and report errors only
 	@go test -short $(TEST_PACKAGES)
