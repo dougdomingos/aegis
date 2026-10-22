@@ -88,3 +88,36 @@ func TestFleetE2E_ValidLabKeys_FleetAuthenticatesFlipsConnectedAndStopsGracefull
 
 	assertNoSecrets(t, string(out))
 }
+
+func TestFleetE2E_WrongLabKey_SentinelExitsRejectedWhileFleetStaysConnected(t *testing.T) {
+	f := newFleet(t, 3)
+	f.startOrchestrator(t)
+
+	valid := make([]*sentinelHandle, 2)
+	for i := range valid {
+		valid[i] = f.startSentinel(t, i, validLabKeyHex)
+	}
+
+	f.waitForConnected(t, []string{sentinelIP(0), sentinelIP(1)}, readyTimeout)
+
+	rejected := f.startSentinel(t, 2, wrongLabKeyHex)
+	rejected.waitForExitCode(t, 1, readyTimeout)
+
+	output := rejected.logs(t)
+	if !strings.Contains(output, "authentication rejected by the orchestrator") {
+		t.Errorf("rejected sentinel output is missing the rejection error;\nlogs:\n%s", output)
+	}
+
+	assertNoSecrets(t, output)
+
+	got := f.machines(t)
+	for _, ip := range []string{sentinelIP(0), sentinelIP(1)} {
+		if got[ip].Status != "CONNECTED" {
+			t.Errorf("machine %s status = %q, want CONNECTED", ip, got[ip].Status)
+		}
+	}
+
+	if got[sentinelIP(2)].Status != "DISCONNECTED" {
+		t.Errorf("machine %s status = %q, want DISCONNECTED", sentinelIP(2), got[sentinelIP(2)].Status)
+	}
+}

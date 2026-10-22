@@ -433,3 +433,36 @@ func assertNoSecrets(t *testing.T, output string) {
 		t.Errorf("secret material leaked into the provided output: %d hit(s)", len(hits))
 	}
 }
+
+// waitForExitCode blocks until the container is observed as stopped by the
+// runtime on its own and asserts the exit code it reported.
+func (h *sentinelHandle) waitForExitCode(t *testing.T, want int, timeout time.Duration) {
+	t.Helper()
+
+	ctx := context.Background()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		state, err := h.container.State(ctx)
+		if err != nil {
+			t.Fatalf("failed to inspect the sentinel at %s: %v", h.ip, err)
+		}
+
+		if !state.Running {
+			info, err := h.container.Inspect(ctx)
+			if err != nil {
+				t.Fatalf("failed to inspect the sentinel at %s: %v", h.ip, err)
+			}
+
+			if info.State.ExitCode != want {
+				t.Fatalf("the sentinel at %s exited with code %d, want %d;\nlogs:\n%s",
+					h.ip, info.State.ExitCode, want, h.logs(t))
+			}
+
+			return
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("the sentinel at %s did not exit within %v;\nlogs:\n%s", h.ip, timeout, h.logs(t))
+}
