@@ -33,10 +33,10 @@ type Config struct {
 
 // parseLevelNames lists the level names accepted by the log level parser.
 var parseLevelNames = map[string]slog.Level{
-	slog.LevelDebug.String(): slog.LevelDebug,
-	slog.LevelInfo.String():  slog.LevelInfo,
-	slog.LevelWarn.String():  slog.LevelWarn,
-	slog.LevelError.String(): slog.LevelError,
+	"debug": slog.LevelDebug,
+	"info":  slog.LevelInfo,
+	"warn":  slog.LevelWarn,
+	"error": slog.LevelError,
 }
 
 // ParseLevel converts a level name into a slog.Level. The name is matched
