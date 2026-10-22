@@ -16,12 +16,40 @@ import (
 )
 
 const (
-	serverAddress   = ":8080"
+	// envServerAddress is the environment variable overriding the address the
+	// API server binds to.
+	envServerAddress = "AEGIS_ADDR"
+
+	// envDatabasePath is the environment variable holding the path of the
+	// SQLite database file.
+	envDatabasePath = "AEGIS_DB"
+
+	// defaultServerAddress is the address the API server binds to when the
+	// environment does not override it.
+	defaultServerAddress = ":8080"
+
+	// defaultDatabasePath is the location of the SQLite database file when the
+	// environment does not override it.
+	defaultDatabasePath = "/tmp/aegis.db"
+
 	shutdownTimeout = 5 * time.Second
 )
 
+// envOrDefault reads the provided environment variable, falling back to the
+// provided default when it is unset or blank.
+func envOrDefault(name, fallback string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	return value
+}
+
 func main() {
-	db, err := infra.InitDB("/tmp/aegis.db")
+	serverAddress := envOrDefault(envServerAddress, defaultServerAddress)
+
+	db, err := infra.InitDB(envOrDefault(envDatabasePath, defaultDatabasePath))
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
