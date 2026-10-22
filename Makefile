@@ -1,4 +1,4 @@
-.PHONY: init tests coverage test-report build help
+.PHONY: init tests coverage test-report e2e build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
@@ -36,6 +36,9 @@ coverage: ## Run all tests and compute coverage
 
 test-report: ## Run all tests and yield report as HTML
 	@go test -v -json -coverprofile=coverage.out $(TEST_PACKAGES) | test-prettify --cov-prof coverage.out
+
+e2e: ## Run the end-to-end suite against the real binaries
+	@go test -tags e2e -v ./e2e/...
 
 help: ## Show help for each make command
 	@echo 'Makefile commands:'

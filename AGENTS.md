@@ -82,6 +82,9 @@ make coverage
 # Run all tests and yield an HTML coverage report
 make test-report
 
+# Run the end-to-end suite against the real binaries
+make e2e
+
 # List every available target
 make help
 ```
