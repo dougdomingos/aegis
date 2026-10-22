@@ -8,6 +8,8 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/workflows/ci.yml"
+      - "e2e/**"
+      - ".dockerignore"
 
   pull_request:
     branches: [main, develop]
@@ -16,6 +18,8 @@ on:
       - "go.mod"
       - "go.sum"
       - ".github/workflows/ci.yml"
+      - "e2e/**"
+      - ".dockerignore"
 
 jobs:
   test:
