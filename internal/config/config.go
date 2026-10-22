@@ -4,13 +4,14 @@ package config
 
 import (
 	"encoding/csv"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"strings"
 	"time"
+
+	"dougdomingos.com/aegis/internal/auth"
 )
 
 const (
@@ -32,9 +33,6 @@ const (
 	// envMachines is the environment variable holding the path to the CSV file
 	// listing the accepted machine sources.
 	envMachines = "AEGIS_MACHINES"
-
-	// labKeyLength is the required length, in bytes, of the shared lab key.
-	labKeyLength = 32
 
 	// machinesHeader is the expected header row of the machines CSV file.
 	machinesHeader = "ip,name"
@@ -101,25 +99,17 @@ func Load() (*Config, error) {
 }
 
 // parseLabKey reads the shared lab key from the file at the provided path,
-// requiring a hex-encoded value that decodes to exactly 32 bytes.
+// requiring a hex-encoded value that decodes to exactly auth.LabKeyLength
+// bytes.
 func parseLabKey(path string) ([]byte, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return nil, fmt.Errorf("%s is required", envLabKey)
 	}
 
-	data, err := os.ReadFile(trimmed)
+	key, err := auth.ReadLabKey(trimmed)
 	if err != nil {
-		return nil, fmt.Errorf("invalid %s: failed to read key file: %w", envLabKey, err)
-	}
-
-	key, err := hex.DecodeString(strings.TrimSpace(string(data)))
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: key file must be hex-encoded: %w", envLabKey, err)
-	}
-
-	if len(key) != labKeyLength {
-		return nil, fmt.Errorf("invalid %s: key file must decode to exactly %d bytes", envLabKey, labKeyLength)
+		return nil, fmt.Errorf("invalid %s: %w", envLabKey, err)
 	}
 
 	return key, nil
