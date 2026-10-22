@@ -57,3 +57,20 @@ jobs:
       - name: Display Detailed Coverage Breakdown (Optional)
         if: always()
         run: go tool cover -func=coverage.out
+
+  e2e:
+    name: Run E2E Suite (Testcontainers)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Run end-to-end suite
+        run: make e2e

@@ -82,7 +82,8 @@ make coverage
 # Run all tests and yield an HTML coverage report
 make test-report
 
-# Run the end-to-end suite against the real binaries
+# Run the end-to-end suite with Testcontainers against the real binaries in
+# containers (requires Docker)
 make e2e
 
 # List every available target
