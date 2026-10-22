@@ -9,6 +9,7 @@ TEST_PACKAGES = ./internal/store \
 	./internal/api \
 	./internal/sentinel/config \
 	./internal/sentinel/identity \
+	./internal/sentinel/client \
 	./internal/infra/migrations \
 	./internal/infra/query \
 	./internal/api/handler \
