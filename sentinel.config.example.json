@@ -1,0 +1,7 @@
+{
+  "orchestrator_url": "http://10.0.0.5:8080",
+  "lab_key_path": "/etc/aegis/lab.key",
+  "request_timeout": "10s",
+  "log_level": "info",
+  "log_format": "text"
+}
