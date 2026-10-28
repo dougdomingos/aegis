@@ -1,9 +1,11 @@
 package store_test
 
 import (
+	"errors"
 	"testing"
 
 	"dougdomingos.com/aegis/internal/domain"
+	machineErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/store"
 	_ "modernc.org/sqlite"
 )
@@ -249,5 +251,14 @@ func TestMachineStore_Touch_EmptyMAC_PreservesStoredMAC(t *testing.T) {
 
 	if touched.LastSeenAt == nil {
 		t.Error("expected last_seen_at to be populated")
+	}
+}
+
+func TestMachineStore_Touch_WithUnknownID_ReturnsMachineNotFoundError(t *testing.T) {
+	ctx, store := arrangeStoreTest(t, store.NewMachineStore)
+
+	_, err := store.Touch(ctx, 999, "aa:bb:cc", domain.ConnectedStatus)
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected ErrMachineNotFound, got: %v", err)
 	}
 }

@@ -568,7 +568,7 @@ func TestMachineService_Heartbeat_InvalidToken_ReturnsInvalidSessionTokenError(t
 	}
 }
 
-func TestMachineService_Heartbeat_UnknownMachineID_ReturnsError(t *testing.T) {
+func TestMachineService_Heartbeat_UnknownMachineID_ReturnsInvalidSessionTokenError(t *testing.T) {
 	ctx, _, svc, clock := arrangeMachineServiceTest(t)
 
 	token, _, err := auth.SignSessionToken(999, "sign-secret", 24*time.Hour, clock.Now())
@@ -576,8 +576,8 @@ func TestMachineService_Heartbeat_UnknownMachineID_ReturnsError(t *testing.T) {
 		t.Fatalf("failed to sign session token: %v", err)
 	}
 
-	if err := svc.Heartbeat(ctx, token); err == nil {
-		t.Error("expected an error when the token references a machine that does not exist")
+	if err := svc.Heartbeat(ctx, token); !errors.Is(err, machineErrors.ErrSessionTokenInvalid) {
+		t.Errorf("expected ErrSessionTokenInvalid when the token references a machine that no longer exists, got: %v", err)
 	}
 }
 

@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"dougdomingos.com/aegis/internal/auth"
 	"dougdomingos.com/aegis/internal/domain"
-	"dougdomingos.com/aegis/internal/errors"
+	machineErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
 	"dougdomingos.com/aegis/internal/store"
 )
@@ -81,7 +83,7 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 // IP, returning a single-use nonce to be signed by the machine.
 func (service *MachineService) InitiateAuthentication(ctx context.Context, payload schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error) {
 	if strings.TrimSpace(payload.IP) == "" {
-		return nil, errors.ErrMachineIPRequired
+		return nil, machineErrors.ErrMachineIPRequired
 	}
 
 	nonce, expiresAt := service.nonces.Issue(payload.IP)
@@ -97,21 +99,21 @@ func (service *MachineService) InitiateAuthentication(ctx context.Context, paylo
 // issues a session token.
 func (service *MachineService) Authenticate(ctx context.Context, payload schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error) {
 	if strings.TrimSpace(payload.IP) == "" {
-		return nil, errors.ErrMachineIPRequired
+		return nil, machineErrors.ErrMachineIPRequired
 	}
 
 	nonce, ok := service.nonces.Lookup(payload.IP)
 	if !ok {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	signature, err := hex.DecodeString(payload.Signature)
 	if err != nil {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	if !auth.Verify(service.labKey, auth.CanonicalPayload(payload.IP, nonce), signature) {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	machine, err := service.store.GetByIP(ctx, payload.IP)
@@ -120,7 +122,7 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 	}
 
 	if machine == nil {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	service.nonces.Consume(payload.IP)
@@ -156,6 +158,9 @@ func (service *MachineService) Heartbeat(ctx context.Context, token string) erro
 	}
 
 	_, err = service.store.Touch(ctx, machineID, "", domain.ConnectedStatus)
+	if errors.Is(err, machineErrors.ErrMachineNotFound) {
+		return fmt.Errorf("%w: the machine is no longer registered", machineErrors.ErrSessionTokenInvalid)
+	}
 
 	return err
 }

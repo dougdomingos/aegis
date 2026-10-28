@@ -15,4 +15,8 @@ var (
 	// ErrSessionTokenInvalid is returned when a session token presented to the
 	// system is malformed, tampered with, or expired.
 	ErrSessionTokenInvalid = errors.New("invalid session token")
+
+	// ErrMachineNotFound is returned when an operation targets a machine that
+	// is no longer registered in the system.
+	ErrMachineNotFound = errors.New("machine not found")
 )

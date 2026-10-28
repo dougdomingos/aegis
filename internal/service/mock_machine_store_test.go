@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	machineErrors "dougdomingos.com/aegis/internal/errors"
+
 	"dougdomingos.com/aegis/internal/domain"
 )
 
@@ -132,5 +134,5 @@ func (mock *MockMachineStore) Touch(ctx context.Context, id int64, mac string, s
 		}
 	}
 
-	return nil, fmt.Errorf("machine with id %d not found", id)
+	return nil, fmt.Errorf("%w: id %d", machineErrors.ErrMachineNotFound, id)
 }

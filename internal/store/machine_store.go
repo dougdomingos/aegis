@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"dougdomingos.com/aegis/internal/domain"
+	"dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/infra/query"
 )
 
@@ -106,7 +107,7 @@ func (store *MachineStore) Touch(ctx context.Context, id int64, mac string, stat
 	}
 
 	if rowsAffected == 0 {
-		return nil, fmt.Errorf("machine with id %d not found", id)
+		return nil, fmt.Errorf("%w: id %d", errors.ErrMachineNotFound, id)
 	}
 
 	return store.executor.QueryOne(ctx, queryGetMachineByID, id)
