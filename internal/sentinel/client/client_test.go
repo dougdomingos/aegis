@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -188,6 +189,106 @@ func TestClient_Authenticate_WithTrailingSlashBaseURL_RequestsExactPath(t *testi
 
 	if receivedPath != "/machines/authenticate/init" {
 		t.Errorf("received path = %q, want /machines/authenticate/init", receivedPath)
+	}
+}
+
+func TestClient_Heartbeat_ValidToken_ReturnsNoError(t *testing.T) {
+	var receivedPath, receivedAuth string
+	var receivedBody []byte
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedAuth = r.Header.Get("Authorization")
+		receivedBody, _ = io.ReadAll(r.Body)
+
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cl := newTestClient(t, server.URL, 2*time.Second)
+
+	if err := cl.Heartbeat(t.Context(), "session-token"); err != nil {
+		t.Fatalf("client.Heartbeat() error = %v, want nil", err)
+	}
+
+	if receivedPath != "/machines/heartbeat" {
+		t.Errorf("request path = %q, want /machines/heartbeat", receivedPath)
+	}
+
+	if receivedAuth != "Bearer session-token" {
+		t.Errorf("Authorization header = %q, want Bearer session-token", receivedAuth)
+	}
+
+	if len(receivedBody) != 0 {
+		t.Errorf("request body = %q, want empty", receivedBody)
+	}
+}
+
+func TestClient_Heartbeat_RejectedToken_ReturnsAuthenticationRejectedError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error_code":401,"message":"invalid session token"}`)
+	}))
+	defer server.Close()
+
+	cl := newTestClient(t, server.URL, 2*time.Second)
+
+	err := cl.Heartbeat(t.Context(), "expired-token")
+	if err == nil {
+		t.Fatalf("client.Heartbeat() error = nil, want error")
+	}
+
+	if !errors.Is(err, sentinelErrors.ErrAuthenticationRejected) {
+		t.Errorf("client.Heartbeat() error = %v, want ErrAuthenticationRejected", err)
+	}
+}
+
+func TestClient_Heartbeat_ServerError_ReturnsPlainError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cl := newTestClient(t, server.URL, 2*time.Second)
+
+	err := cl.Heartbeat(t.Context(), "session-token")
+	if err == nil {
+		t.Fatalf("client.Heartbeat() error = nil, want error")
+	}
+
+	if errors.Is(err, sentinelErrors.ErrAuthenticationRejected) || errors.Is(err, sentinelErrors.ErrOrchestratorUnreachable) {
+		t.Errorf("client.Heartbeat() error = %v, want plain status error", err)
+	}
+}
+
+func TestClient_Heartbeat_UnreachableOrchestrator_ReturnsUnreachableError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	server.Close()
+
+	cl := newTestClient(t, server.URL, 2*time.Second)
+
+	if err := cl.Heartbeat(t.Context(), "session-token"); !errors.Is(err, sentinelErrors.ErrOrchestratorUnreachable) {
+		t.Errorf("client.Heartbeat() error = %v, want ErrOrchestratorUnreachable", err)
+	}
+}
+
+func TestClient_Heartbeat_TrailingSlashBaseURL_RequestsExactPath(t *testing.T) {
+	var receivedPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	cl := newTestClient(t, server.URL+"/", 2*time.Second)
+
+	if err := cl.Heartbeat(t.Context(), "session-token"); err != nil {
+		t.Fatalf("client.Heartbeat() error = %v, want nil", err)
+	}
+
+	if receivedPath != "/machines/heartbeat" {
+		t.Errorf("request path = %q, want /machines/heartbeat", receivedPath)
 	}
 }
 
