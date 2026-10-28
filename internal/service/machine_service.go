@@ -13,6 +13,11 @@ import (
 	"dougdomingos.com/aegis/internal/store"
 )
 
+// machineStalenessGrace is how long a machine remains displayed as CONNECTED
+// after its last heartbeat, covering three consecutive beats of the default
+// Sentinel heartbeat interval.
+const machineStalenessGrace = 90 * time.Second
+
 // MachineService provides all operations needed to manage machine
 // authentication in the system.
 type MachineService struct {
@@ -66,7 +71,7 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 
 	output := make([]schemas.MachineOutputSchema, 0, len(machines))
 	for i := range machines {
-		output = append(output, *mapMachineToOutputSchema(&machines[i]))
+		output = append(output, *mapMachineToOutputSchema(&machines[i], service.now()))
 	}
 
 	return output, nil
@@ -138,16 +143,35 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 	return &schemas.AuthenticateOutputSchema{
 		SessionToken: sessionToken,
 		ExpiresAt:    expiresAt,
-		Machine:      *mapMachineToOutputSchema(connected),
+		Machine:      *mapMachineToOutputSchema(connected, service.now()),
 	}, nil
 }
 
+// Heartbeat validates the provided session token and refreshes the
+// connectivity state and last-seen timestamp of the machine it identifies.
+func (service *MachineService) Heartbeat(ctx context.Context, token string) error {
+	machineID, err := auth.ParseSessionToken(token, service.sessionSecret, service.now())
+	if err != nil {
+		return err
+	}
+
+	_, err = service.store.Touch(ctx, machineID, "", domain.ConnectedStatus)
+
+	return err
+}
+
 // mapMachineToOutputSchema converts the Machine entity format into the output
-// schema provided by this service. Returns nil if the provided machine is
-// nil.
-func mapMachineToOutputSchema(machine *domain.Machine) *schemas.MachineOutputSchema {
+// schema provided by this service, deriving the displayed status from the
+// freshness of the machine's last-seen timestamp. Returns nil if the provided
+// machine is nil.
+func mapMachineToOutputSchema(machine *domain.Machine, now time.Time) *schemas.MachineOutputSchema {
 	if machine == nil {
 		return nil
+	}
+
+	status := domain.DisconnectedStatus
+	if machine.LastSeenAt != nil && now.Sub(*machine.LastSeenAt) <= machineStalenessGrace {
+		status = domain.ConnectedStatus
 	}
 
 	return &schemas.MachineOutputSchema{
@@ -155,7 +179,7 @@ func mapMachineToOutputSchema(machine *domain.Machine) *schemas.MachineOutputSch
 		Name:       machine.Name,
 		IP:         machine.IP,
 		MAC:        machine.MAC,
-		Status:     string(machine.Status),
+		Status:     string(status),
 		LastSeenAt: machine.LastSeenAt,
 		CreatedAt:  machine.CreatedAt,
 	}

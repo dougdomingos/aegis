@@ -482,6 +482,201 @@ func TestMachineService_Authenticate_WhenStoreFails_ReturnsError(t *testing.T) {
 }
 
 // ============================================================================
+// Heartbeat
+// ============================================================================
+
+func TestMachineService_Heartbeat_ValidToken_TouchesMachineConnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error listing machines, got: %v", err)
+	}
+
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 machine, got %d", len(listed))
+	}
+
+	if listed[0].Status != string(domain.ConnectedStatus) {
+		t.Errorf("expected status %q after heartbeat, got %q", domain.ConnectedStatus, listed[0].Status)
+	}
+
+	if listed[0].LastSeenAt == nil {
+		t.Error("expected last_seen_at to be refreshed by the heartbeat")
+	}
+}
+
+func TestMachineService_Heartbeat_InvalidToken_ReturnsInvalidSessionTokenError(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	expiredToken, _, err := auth.SignSessionToken(machine.ID, "sign-secret", -time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign expired token: %v", err)
+	}
+
+	foreignToken, _, err := auth.SignSessionToken(machine.ID, "other-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign foreign token: %v", err)
+	}
+
+	scenarios := map[string]struct {
+		token string
+	}{
+		"missing token":   {token: ""},
+		"malformed token": {token: "not-a-token"},
+		"foreign secret":  {token: foreignToken},
+		"expired session": {token: expiredToken},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			if err := svc.Heartbeat(ctx, scenario.token); !errors.Is(err, machineErrors.ErrSessionTokenInvalid) {
+				t.Errorf("expected ErrSessionTokenInvalid, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestMachineService_Heartbeat_UnknownMachineID_ReturnsError(t *testing.T) {
+	ctx, _, svc, clock := arrangeMachineServiceTest(t)
+
+	token, _, err := auth.SignSessionToken(999, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err == nil {
+		t.Error("expected an error when the token references a machine that does not exist")
+	}
+}
+
+func TestMachineService_ListMachines_MachineNeverSeen_DisplaysDisconnected(t *testing.T) {
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
+
+	if _, err := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}); err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
+	}
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 machine, got %d", len(listed))
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q for a never-seen machine, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+
+	if listed[0].LastSeenAt != nil {
+		t.Errorf("expected nil last_seen_at for a never-seen machine, got %v", listed[0].LastSeenAt)
+	}
+}
+
+func TestMachineService_ListMachines_StaleMachine_DisplaysDisconnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(91 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q after 91s of silence, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+}
+
+func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(10 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.ConnectedStatus) {
+		t.Errorf("expected status %q after 10s, got %q", domain.ConnectedStatus, listed[0].Status)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
