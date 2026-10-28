@@ -2,17 +2,15 @@ package service
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"dougdomingos.com/aegis/internal/auth"
 	"dougdomingos.com/aegis/internal/domain"
-	"dougdomingos.com/aegis/internal/errors"
+	machineErrors "dougdomingos.com/aegis/internal/errors"
 	"dougdomingos.com/aegis/internal/schemas"
 	"dougdomingos.com/aegis/internal/store"
 )
@@ -34,6 +32,10 @@ type MachineService struct {
 	// sessionTTL is the lifetime of an issued session token.
 	sessionTTL time.Duration
 
+	// stalenessGrace is the duration a machine remains displayed as CONNECTED
+	// after its last heartbeat.
+	stalenessGrace time.Duration
+
 	// nonces tracks the pending authentication challenges per machine IP.
 	nonces *store.NonceStore
 
@@ -43,14 +45,15 @@ type MachineService struct {
 
 // NewMachineService creates a new service instance with the provided store
 // provider and authentication secrets.
-func NewMachineService(machineStore domain.MachineStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, now func() time.Time) *MachineService {
+func NewMachineService(machineStore domain.MachineStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
 	return &MachineService{
-		store:         machineStore,
-		labKey:        labKey,
-		sessionSecret: sessionSecret,
-		sessionTTL:    sessionTTL,
-		nonces:        store.NewNonceStore(now),
-		now:           now,
+		store:          machineStore,
+		labKey:         labKey,
+		sessionSecret:  sessionSecret,
+		sessionTTL:     sessionTTL,
+		stalenessGrace: stalenessGrace,
+		nonces:         store.NewNonceStore(now),
+		now:            now,
 	}
 }
 
@@ -70,7 +73,7 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 
 	output := make([]schemas.MachineOutputSchema, 0, len(machines))
 	for i := range machines {
-		output = append(output, *mapMachineToOutputSchema(&machines[i]))
+		output = append(output, *mapMachineToOutputSchema(&machines[i], service.now(), service.stalenessGrace))
 	}
 
 	return output, nil
@@ -80,7 +83,7 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 // IP, returning a single-use nonce to be signed by the machine.
 func (service *MachineService) InitiateAuthentication(ctx context.Context, payload schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error) {
 	if strings.TrimSpace(payload.IP) == "" {
-		return nil, errors.ErrMachineIPRequired
+		return nil, machineErrors.ErrMachineIPRequired
 	}
 
 	nonce, expiresAt := service.nonces.Issue(payload.IP)
@@ -96,21 +99,21 @@ func (service *MachineService) InitiateAuthentication(ctx context.Context, paylo
 // issues a session token.
 func (service *MachineService) Authenticate(ctx context.Context, payload schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error) {
 	if strings.TrimSpace(payload.IP) == "" {
-		return nil, errors.ErrMachineIPRequired
+		return nil, machineErrors.ErrMachineIPRequired
 	}
 
 	nonce, ok := service.nonces.Lookup(payload.IP)
 	if !ok {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	signature, err := hex.DecodeString(payload.Signature)
 	if err != nil {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	if !auth.Verify(service.labKey, auth.CanonicalPayload(payload.IP, nonce), signature) {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	machine, err := service.store.GetByIP(ctx, payload.IP)
@@ -119,7 +122,7 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 	}
 
 	if machine == nil {
-		return nil, errors.ErrInvalidCredentials
+		return nil, machineErrors.ErrInvalidCredentials
 	}
 
 	service.nonces.Consume(payload.IP)
@@ -134,7 +137,7 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 		return nil, err
 	}
 
-	sessionToken, expiresAt, err := issueSessionToken(connected.ID, service.sessionSecret, service.sessionTTL, service.now())
+	sessionToken, expiresAt, err := auth.SignSessionToken(connected.ID, service.sessionSecret, service.sessionTTL, service.now())
 	if err != nil {
 		return nil, err
 	}
@@ -142,32 +145,38 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 	return &schemas.AuthenticateOutputSchema{
 		SessionToken: sessionToken,
 		ExpiresAt:    expiresAt,
-		Machine:      *mapMachineToOutputSchema(connected),
+		Machine:      *mapMachineToOutputSchema(connected, service.now(), service.stalenessGrace),
 	}, nil
 }
 
-// issueSessionToken builds an HMAC-SHA256-signed session token encoding the
-// machine ID and its expiry, and returns the token along with the expiry
-// timestamp.
-func issueSessionToken(machineID int64, secret string, ttl time.Duration, now time.Time) (string, time.Time, error) {
-	expiresAt := now.Add(ttl)
-	payload := fmt.Sprintf("%d:%d", machineID, expiresAt.Unix())
+// Heartbeat validates the provided session token and refreshes the
+// connectivity state and last-seen timestamp of the machine it identifies.
+func (service *MachineService) Heartbeat(ctx context.Context, token string) error {
+	machineID, err := auth.ParseSessionToken(token, service.sessionSecret, service.now())
+	if err != nil {
+		return err
+	}
 
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
+	_, err = service.store.Touch(ctx, machineID, "", domain.ConnectedStatus)
+	if errors.Is(err, machineErrors.ErrMachineNotFound) {
+		return fmt.Errorf("%w: the machine is no longer registered", machineErrors.ErrSessionTokenInvalid)
+	}
 
-	token := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
-		base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-
-	return token, expiresAt, nil
+	return err
 }
 
 // mapMachineToOutputSchema converts the Machine entity format into the output
-// schema provided by this service. Returns nil if the provided machine is
-// nil.
-func mapMachineToOutputSchema(machine *domain.Machine) *schemas.MachineOutputSchema {
+// schema provided by this service, deriving the displayed status from the
+// freshness of the machine's last-seen timestamp. Returns nil if the provided
+// machine is nil.
+func mapMachineToOutputSchema(machine *domain.Machine, now time.Time, grace time.Duration) *schemas.MachineOutputSchema {
 	if machine == nil {
 		return nil
+	}
+
+	status := domain.DisconnectedStatus
+	if machine.LastSeenAt != nil && now.Sub(*machine.LastSeenAt) <= grace {
+		status = domain.ConnectedStatus
 	}
 
 	return &schemas.MachineOutputSchema{
@@ -175,7 +184,7 @@ func mapMachineToOutputSchema(machine *domain.Machine) *schemas.MachineOutputSch
 		Name:       machine.Name,
 		IP:         machine.IP,
 		MAC:        machine.MAC,
-		Status:     string(machine.Status),
+		Status:     string(status),
 		LastSeenAt: machine.LastSeenAt,
 		CreatedAt:  machine.CreatedAt,
 	}

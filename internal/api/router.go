@@ -51,7 +51,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	machineStore := store.NewMachineStore(db)
 	policyStore := store.NewPolicyStore(db)
 
-	machineService := service.NewMachineService(machineStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, time.Now)
+	machineService := service.NewMachineService(machineStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
 	if err := seedMachines(machineService, cfg); err != nil {
 		return nil, err
 	}

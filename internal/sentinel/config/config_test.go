@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,6 +198,73 @@ func TestConfig_Load_WithInvalidLogFormat_ReturnsError(t *testing.T) {
 
 	if _, err := config.Load(writeTempConfig(t, document)); err == nil {
 		t.Errorf("config.Load() error = nil, want error")
+	}
+}
+
+func TestConfig_Load_HeartbeatInterval_UnsetField_DefaultsTo30Seconds(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{
+		"orchestrator_url": "http://10.0.0.5:8080",
+		"lab_key_path": "` + keyPath + `"
+	}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.HeartbeatInterval != 30*time.Second {
+		t.Errorf("cfg.HeartbeatInterval = %v, want 30s", cfg.HeartbeatInterval)
+	}
+}
+
+func TestConfig_Load_HeartbeatInterval_ValidValue_ReturnsParsedDuration(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{
+		"orchestrator_url": "http://10.0.0.5:8080",
+		"lab_key_path": "` + keyPath + `",
+		"heartbeat_interval": "5s"
+	}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.HeartbeatInterval != 5*time.Second {
+		t.Errorf("cfg.HeartbeatInterval = %v, want 5s", cfg.HeartbeatInterval)
+	}
+}
+
+func TestConfig_Load_HeartbeatInterval_InvalidValues_ReturnError(t *testing.T) {
+	cases := map[string]struct {
+		interval string
+	}{
+		"malformed":                {interval: "soon"},
+		"zero":                     {interval: "0s"},
+		"negative":                 {interval: "-5s"},
+		"exceeds staleness grace":  {interval: "2m"},
+		"equal to staleness grace": {interval: "90s"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			keyPath := writeTempFile(t, labKeyFile)
+			document := `{
+				"orchestrator_url": "http://10.0.0.5:8080",
+				"lab_key_path": "` + keyPath + `",
+				"heartbeat_interval": "` + tc.interval + `"
+			}`
+
+			_, err := config.Load(writeTempConfig(t, document))
+			if err == nil {
+				t.Fatalf("config.Load() error = nil, want error")
+			}
+
+			if !strings.Contains(err.Error(), "heartbeat_interval") {
+				t.Errorf("config.Load() error = %v, want mention of heartbeat_interval", err)
+			}
+		})
 	}
 }
 

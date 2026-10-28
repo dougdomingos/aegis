@@ -20,6 +20,7 @@ type mockMachineService struct {
 	listFn         func(ctx context.Context) ([]schemas.MachineOutputSchema, error)
 	initiateFn     func(ctx context.Context, p schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error)
 	authenticateFn func(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
+	heartbeatFn    func(ctx context.Context, token string) error
 }
 
 func (m *mockMachineService) ListMachines(ctx context.Context) ([]schemas.MachineOutputSchema, error) {
@@ -59,4 +60,8 @@ func machineOutput(id int64, name, ip string) schemas.MachineOutputSchema {
 		Status:    "DISCONNECTED",
 		CreatedAt: time.Now(),
 	}
+}
+
+func (m *mockMachineService) Heartbeat(ctx context.Context, token string) error {
+	return m.heartbeatFn(ctx, token)
 }

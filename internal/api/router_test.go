@@ -36,9 +36,10 @@ func TestNewRouter_WithValidConfig_RegistersMachineRoutes(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		LabKey:        labKey,
-		SessionSecret: "sign-secret",
-		SessionTTL:    24 * time.Hour,
+		LabKey:         labKey,
+		SessionSecret:  "sign-secret",
+		SessionTTL:     24 * time.Hour,
+		StalenessGrace: 90 * time.Second,
 		Machines: []config.Machine{
 			{IP: "10.0.1.11", Name: "lcc1-011"},
 		},
@@ -85,9 +86,10 @@ func TestNewRouter_WithValidConfig_AuthenticatesConfiguredMachine(t *testing.T) 
 	}
 
 	cfg := &config.Config{
-		LabKey:        labKey,
-		SessionSecret: "sign-secret",
-		SessionTTL:    24 * time.Hour,
+		LabKey:         labKey,
+		SessionSecret:  "sign-secret",
+		SessionTTL:     24 * time.Hour,
+		StalenessGrace: 90 * time.Second,
 		Machines: []config.Machine{
 			{IP: "10.0.1.11", Name: "lcc1-011"},
 		},

@@ -15,6 +15,7 @@ import (
 	"dougdomingos.com/aegis/internal/sentinel/client"
 	"dougdomingos.com/aegis/internal/sentinel/config"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
+	"dougdomingos.com/aegis/internal/sentinel/heartbeat"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/internal/sentinel/logging"
 )
@@ -52,13 +53,18 @@ func run() int {
 	defer stop()
 
 	detector := identity.NewDetector()
-	authenticator := client.New(cfg.OrchestratorURL, cfg.LabKey, cfg.RequestTimeout, logger)
+	orchestrator := client.New(cfg.OrchestratorURL, cfg.LabKey, cfg.RequestTimeout, logger)
+	heartbeats := heartbeat.New(cfg.HeartbeatInterval, orchestrator, orchestrator, logger)
 
 	logger.Info("configuration loaded",
 		"orchestrator_url", cfg.OrchestratorURL.String(),
-		"request_timeout", cfg.RequestTimeout)
+		"request_timeout", cfg.RequestTimeout,
+		"heartbeat_interval", cfg.HeartbeatInterval)
 
-	if err := daemon.New(logger, detector, authenticator).Run(ctx); err != nil {
+	if err := daemon.New(logger, detector, orchestrator, daemon.Task{
+		Name: "heartbeat",
+		Run:  heartbeats.Run,
+	}).Run(ctx); err != nil {
 		logger.Error("daemon stopped with a fatal error", "error", err)
 
 		return 1

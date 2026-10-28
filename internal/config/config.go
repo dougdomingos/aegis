@@ -34,6 +34,15 @@ const (
 	// listing the accepted machine sources.
 	envMachines = "AEGIS_MACHINES"
 
+	// envStalenessGrace is the environment variable overriding the default
+	// machine staleness grace window.
+	envStalenessGrace = "AEGIS_STALENESS_GRACE"
+
+	// defaultStalenessGrace is the default duration a machine remains displayed
+	// as CONNECTED after its last heartbeat, covering three consecutive beats of
+	// the default Sentinel heartbeat interval.
+	defaultStalenessGrace = "90s"
+
 	// machinesHeader is the expected header row of the machines CSV file.
 	machinesHeader = "ip,name"
 )
@@ -59,6 +68,10 @@ type Config struct {
 	// SessionTTL is the lifetime of an issued session token.
 	SessionTTL time.Duration
 
+	// StalenessGrace is the duration a machine remains displayed as CONNECTED
+	// after its last heartbeat.
+	StalenessGrace time.Duration
+
 	// Machines is the list of accepted machine sources.
 	Machines []Machine
 }
@@ -81,6 +94,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	stalenessGrace, err := parseStalenessGrace(os.Getenv(envStalenessGrace))
+	if err != nil {
+		return nil, err
+	}
+
 	machines, err := parseMachines(os.Getenv(envMachines))
 	if err != nil {
 		return nil, err
@@ -91,10 +109,11 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		LabKey:        labKey,
-		SessionSecret: sessionSecret,
-		SessionTTL:    sessionTTL,
-		Machines:      machines,
+		LabKey:         labKey,
+		SessionSecret:  sessionSecret,
+		SessionTTL:     sessionTTL,
+		StalenessGrace: stalenessGrace,
+		Machines:       machines,
 	}, nil
 }
 
@@ -133,6 +152,26 @@ func parseSessionTTL(raw string) (time.Duration, error) {
 	}
 
 	return ttl, nil
+}
+
+// parseStalenessGrace parses the staleness grace environment variable, falling
+// back to the default when it is unset.
+func parseStalenessGrace(raw string) (time.Duration, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		value = defaultStalenessGrace
+	}
+
+	grace, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s value %q: %w", envStalenessGrace, value, err)
+	}
+
+	if grace <= 0 {
+		return 0, fmt.Errorf("invalid %s value %q: must be positive", envStalenessGrace, value)
+	}
+
+	return grace, nil
 }
 
 // parseMachines reads the accepted machine sources from the CSV file at the

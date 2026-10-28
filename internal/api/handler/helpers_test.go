@@ -38,3 +38,15 @@ func assertStatusCode(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 		t.Errorf("expected status code %d, got %d", want, rec.Code)
 	}
 }
+
+// performBearerRequest sends a POST to /machines/heartbeat with the provided
+// bearer token and returns the recorded response.
+func performBearerRequest(t *testing.T, router http.Handler, token string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	rec, req := buildTestRequest(http.MethodPost, "/machines/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(rec, req)
+
+	return rec
+}

@@ -70,6 +70,7 @@ type MachineStore interface {
 	Sync(ctx context.Context, machines []Machine) error
 
 	// Touch updates the connection state and last-seen timestamp of the machine
-	// whose ID matches the provided argument.
+	// whose ID matches the provided argument. An empty MAC preserves the stored
+	// one.
 	Touch(ctx context.Context, id int64, mac string, status MachineStatus) (*Machine, error)
 }

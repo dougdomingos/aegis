@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"dougdomingos.com/aegis/internal/api/utils"
 	"dougdomingos.com/aegis/internal/errors"
@@ -10,12 +11,17 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// bearerPrefix is the scheme expected in the Authorization header of machine
+// requests that present a session token.
+const bearerPrefix = "bearer "
+
 // MachineServiceInterface declares the methods provided by MachineService
 // implementations.
 type MachineServiceInterface interface {
 	ListMachines(ctx context.Context) ([]schemas.MachineOutputSchema, error)
 	InitiateAuthentication(ctx context.Context, p schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error)
 	Authenticate(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
+	Heartbeat(ctx context.Context, token string) error
 }
 
 // MachineHandler implements the methods that map HTTP requests into operations
@@ -35,6 +41,7 @@ func (handler *MachineHandler) RegisterRoutes(r chi.Router) {
 		r.Get("/", handler.List)
 		r.Post("/authenticate/init", handler.Initiate)
 		r.Post("/authenticate", handler.Authenticate)
+		r.Post("/heartbeat", handler.Heartbeat)
 	})
 }
 
@@ -90,4 +97,32 @@ func (handler *MachineHandler) Authenticate(w http.ResponseWriter, r *http.Reque
 	}
 
 	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+// Heartbeat handles connectivity reports from authenticated machines.
+func (handler *MachineHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
+	token := extractBearerToken(r)
+
+	if err := handler.service.Heartbeat(r.Context(), token); err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrSessionTokenInvalid: http.StatusUnauthorized,
+		})
+
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// extractBearerToken returns the bearer credential of the Authorization
+// header, tolerating scheme case and surrounding whitespace, or an empty
+// string when the header does not carry one.
+func extractBearerToken(r *http.Request) string {
+	value := strings.TrimSpace(r.Header.Get("Authorization"))
+
+	if len(value) < len(bearerPrefix) || !strings.EqualFold(value[:len(bearerPrefix)], bearerPrefix) {
+		return ""
+	}
+
+	return strings.TrimSpace(value[len(bearerPrefix):])
 }

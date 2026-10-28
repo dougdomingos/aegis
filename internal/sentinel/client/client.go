@@ -26,6 +26,9 @@ const (
 
 	// authenticatePath is the path of the authentication endpoint.
 	authenticatePath = "/machines/authenticate"
+
+	// heartbeatPath is the path of the connectivity heartbeat endpoint.
+	heartbeatPath = "/machines/heartbeat"
 )
 
 // Client performs authenticated requests against the Orchestrator API.
@@ -85,6 +88,8 @@ func (c *Client) Authenticate(ctx context.Context, id identity.Identity) (*daemo
 		Token:       authenticated.SessionToken,
 		ExpiresAt:   authenticated.ExpiresAt,
 		MachineName: authenticated.Machine.Name,
+		IP:          id.IP,
+		MAC:         id.MAC,
 	}, nil
 }
 
@@ -142,4 +147,32 @@ func (c *Client) errorFromStatus(status int, body []byte) error {
 type errorResponse struct {
 	ErrorCode int    `json:"error_code"`
 	Message   string `json:"message"`
+}
+
+// Heartbeat reports connectivity to the Orchestrator on behalf of the session
+// token, returning nil when the Orchestrator accepts the beat.
+func (c *Client) Heartbeat(ctx context.Context, token string) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.JoinPath(heartbeatPath).String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to build request: %w", err)
+	}
+
+	request.Header.Set("Authorization", "Bearer "+token)
+
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errors.ErrOrchestratorUnreachable, err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		raw, err := io.ReadAll(response.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read orchestrator response: %w", err)
+		}
+
+		return c.errorFromStatus(response.StatusCode, raw)
+	}
+
+	return nil
 }

@@ -2,13 +2,8 @@ package service_test
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -482,6 +477,239 @@ func TestMachineService_Authenticate_WhenStoreFails_ReturnsError(t *testing.T) {
 }
 
 // ============================================================================
+// Heartbeat
+// ============================================================================
+
+func TestMachineService_Heartbeat_ValidToken_TouchesMachineConnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error listing machines, got: %v", err)
+	}
+
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 machine, got %d", len(listed))
+	}
+
+	if listed[0].Status != string(domain.ConnectedStatus) {
+		t.Errorf("expected status %q after heartbeat, got %q", domain.ConnectedStatus, listed[0].Status)
+	}
+
+	if listed[0].LastSeenAt == nil {
+		t.Error("expected last_seen_at to be refreshed by the heartbeat")
+	}
+}
+
+func TestMachineService_Heartbeat_InvalidToken_ReturnsInvalidSessionTokenError(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	expiredToken, _, err := auth.SignSessionToken(machine.ID, "sign-secret", -time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign expired token: %v", err)
+	}
+
+	foreignToken, _, err := auth.SignSessionToken(machine.ID, "other-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign foreign token: %v", err)
+	}
+
+	scenarios := map[string]struct {
+		token string
+	}{
+		"missing token":   {token: ""},
+		"malformed token": {token: "not-a-token"},
+		"foreign secret":  {token: foreignToken},
+		"expired session": {token: expiredToken},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			if err := svc.Heartbeat(ctx, scenario.token); !errors.Is(err, machineErrors.ErrSessionTokenInvalid) {
+				t.Errorf("expected ErrSessionTokenInvalid, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestMachineService_Heartbeat_UnknownMachineID_ReturnsInvalidSessionTokenError(t *testing.T) {
+	ctx, _, svc, clock := arrangeMachineServiceTest(t)
+
+	token, _, err := auth.SignSessionToken(999, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); !errors.Is(err, machineErrors.ErrSessionTokenInvalid) {
+		t.Errorf("expected ErrSessionTokenInvalid when the token references a machine that no longer exists, got: %v", err)
+	}
+}
+
+func TestMachineService_ListMachines_MachineNeverSeen_DisplaysDisconnected(t *testing.T) {
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
+
+	if _, err := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}); err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
+	}
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(listed) != 1 {
+		t.Fatalf("expected 1 machine, got %d", len(listed))
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q for a never-seen machine, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+
+	if listed[0].LastSeenAt != nil {
+		t.Errorf("expected nil last_seen_at for a never-seen machine, got %v", listed[0].LastSeenAt)
+	}
+}
+
+func TestMachineService_ListMachines_StaleMachine_DisplaysDisconnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(91 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q after 91s of silence, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+}
+
+func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T) {
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
+
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := store.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(10 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.ConnectedStatus) {
+		t.Errorf("expected status %q after 10s, got %q", domain.ConnectedStatus, listed[0].Status)
+	}
+}
+
+func TestMachineService_ListMachines_ConfiguredGraceMarksMachineStaleEarlier(t *testing.T) {
+	mockStore := NewMockMachineStore()
+	clock := newTestClock()
+	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
+
+	ctx := context.Background()
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := mockStore.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(11 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q after 11s with a 10s grace, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -499,7 +727,7 @@ func arrangeMachineServiceTest(t *testing.T) (context.Context, *MockMachineStore
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
 	ctx := context.Background()
-	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, clock.Now)
+	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
 
 	return ctx, mockStore, svc, clock
 }
@@ -550,29 +778,9 @@ func signChallengeWithKey(t *testing.T, key []byte, ip, nonce string) string {
 // validSessionToken verifies that the token is a payload signed with the given
 // HMAC secret and that the payload encodes the expected machine ID.
 func validSessionToken(token, secret string, expectedMachineID int64) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return false
-	}
+	machineID, err := auth.ParseSessionToken(token, secret, time.Now())
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return false
-	}
-
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(payload)
-
-	if !hmac.Equal(mac.Sum(nil), signature) {
-		return false
-	}
-
-	return strings.HasPrefix(string(payload), fmt.Sprintf("%d:", expectedMachineID))
+	return err == nil && machineID == expectedMachineID
 }
 
 // testClock is a controllable clock for time-dependent tests.
