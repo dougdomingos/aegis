@@ -2,13 +2,8 @@ package service_test
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -783,29 +778,9 @@ func signChallengeWithKey(t *testing.T, key []byte, ip, nonce string) string {
 // validSessionToken verifies that the token is a payload signed with the given
 // HMAC secret and that the payload encodes the expected machine ID.
 func validSessionToken(token, secret string, expectedMachineID int64) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return false
-	}
+	machineID, err := auth.ParseSessionToken(token, secret, time.Now())
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return false
-	}
-
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(payload)
-
-	if !hmac.Equal(mac.Sum(nil), signature) {
-		return false
-	}
-
-	return strings.HasPrefix(string(payload), fmt.Sprintf("%d:", expectedMachineID))
+	return err == nil && machineID == expectedMachineID
 }
 
 // testClock is a controllable clock for time-dependent tests.

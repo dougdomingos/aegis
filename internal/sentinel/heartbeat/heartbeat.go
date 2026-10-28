@@ -53,8 +53,14 @@ type Runner struct {
 }
 
 // New creates a heartbeat Runner with the provided interval, poster, renewer
-// and logger.
+// and logger. It panics when the interval is not positive, as that is a
+// programming error: the Sentinel configuration validation already rejects
+// non-positive intervals.
 func New(interval time.Duration, poster Poster, renewer SessionRenewer, logger *slog.Logger) *Runner {
+	if interval <= 0 {
+		panic("heartbeat: interval must be positive")
+	}
+
 	return &Runner{
 		interval: interval,
 		poster:   poster,

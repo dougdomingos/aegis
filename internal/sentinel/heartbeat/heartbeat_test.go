@@ -249,3 +249,24 @@ func TestRunner_Run_ContextCancelled_ReturnsNil(t *testing.T) {
 		t.Errorf("heartbeat attempts = %d, want 0 after immediate cancellation", attempts)
 	}
 }
+
+func TestRunner_New_NonPositiveInterval_Panics(t *testing.T) {
+	cases := map[string]struct {
+		interval time.Duration
+	}{
+		"zero":     {interval: 0},
+		"negative": {interval: -time.Second},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered == nil {
+					t.Errorf("expected a panic for interval %v, got none", tc.interval)
+				}
+			}()
+
+			heartbeat.New(tc.interval, &fakePoster{}, &fakeRenewer{}, nil)
+		})
+	}
+}

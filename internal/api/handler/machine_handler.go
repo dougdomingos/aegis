@@ -11,6 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// bearerPrefix is the scheme expected in the Authorization header of machine
+// requests that present a session token.
+const bearerPrefix = "bearer "
+
 // MachineServiceInterface declares the methods provided by MachineService
 // implementations.
 type MachineServiceInterface interface {
@@ -94,10 +98,6 @@ func (handler *MachineHandler) Authenticate(w http.ResponseWriter, r *http.Reque
 
 	utils.EncodeToJSON(w, http.StatusOK, res)
 }
-
-// bearerPrefix is the scheme expected in the Authorization header of machine
-// requests that present a session token.
-const bearerPrefix = "bearer "
 
 // Heartbeat handles connectivity reports from authenticated machines.
 func (handler *MachineHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {

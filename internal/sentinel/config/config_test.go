@@ -201,34 +201,6 @@ func TestConfig_Load_WithInvalidLogFormat_ReturnsError(t *testing.T) {
 	}
 }
 
-// decodeHex decodes the provided hexadecimal string, failing the test on a
-// malformed value.
-func decodeHex(t *testing.T, value string) []byte {
-	t.Helper()
-
-	key, err := hex.DecodeString(value)
-	if err != nil {
-		t.Fatalf("failed to decode hexadecimal value: %v", err)
-	}
-
-	return key
-}
-
-// writeTempFile writes the provided contents to a file in a temporary
-// directory and returns its path.
-func writeTempFile(t *testing.T, contents string) string {
-	t.Helper()
-
-	path := filepath.Join(t.TempDir(), "lab.key")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatalf("failed to write temporary file: %v", err)
-	}
-
-	return path
-}
-
-// writeTempConfig writes the provided JSON document to a file in a temporary
-// directory and returns its path.
 func TestConfig_Load_HeartbeatInterval_UnsetField_DefaultsTo30Seconds(t *testing.T) {
 	keyPath := writeTempFile(t, labKeyFile)
 	document := `{
@@ -296,6 +268,34 @@ func TestConfig_Load_HeartbeatInterval_InvalidValues_ReturnError(t *testing.T) {
 	}
 }
 
+// decodeHex decodes the provided hexadecimal string, failing the test on a
+// malformed value.
+func decodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+
+	key, err := hex.DecodeString(value)
+	if err != nil {
+		t.Fatalf("failed to decode hexadecimal value: %v", err)
+	}
+
+	return key
+}
+
+// writeTempFile writes the provided contents to a file in a temporary
+// directory and returns its path.
+func writeTempFile(t *testing.T, contents string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "lab.key")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("failed to write temporary file: %v", err)
+	}
+
+	return path
+}
+
+// writeTempConfig writes the provided JSON document to a file in a temporary
+// directory and returns its path.
 func writeTempConfig(t *testing.T, document string) string {
 	t.Helper()
 

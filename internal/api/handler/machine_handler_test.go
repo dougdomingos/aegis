@@ -174,16 +174,21 @@ func TestMachineHandler_Heartbeat_ValidBearerToken_ReturnsNoContent(t *testing.T
 func TestMachineHandler_Heartbeat_InvalidToken_ReturnsUnauthorized(t *testing.T) {
 	scenarios := map[string]struct {
 		header    string
+		wantToken string
 		expectErr error
 	}{
-		"expired token":  {header: "Bearer expired-token", expectErr: machineErrors.ErrSessionTokenInvalid},
-		"missing header": {header: "", expectErr: machineErrors.ErrSessionTokenInvalid},
+		"expired token":  {header: "Bearer expired-token", wantToken: "expired-token", expectErr: machineErrors.ErrSessionTokenInvalid},
+		"missing header": {header: "", wantToken: "", expectErr: machineErrors.ErrSessionTokenInvalid},
 	}
 
 	for name, scenario := range scenarios {
 		t.Run(name, func(t *testing.T) {
+			var receivedToken string
+
 			mock := &mockMachineService{
 				heartbeatFn: func(_ context.Context, token string) error {
+					receivedToken = token
+
 					return scenario.expectErr
 				},
 			}
@@ -195,6 +200,10 @@ func TestMachineHandler_Heartbeat_InvalidToken_ReturnsUnauthorized(t *testing.T)
 
 			setupMachineRouter(t, mock).ServeHTTP(rec, req)
 			assertStatusCode(t, rec, http.StatusUnauthorized)
+
+			if receivedToken != scenario.wantToken {
+				t.Errorf("token forwarded to the service = %q, want %q", receivedToken, scenario.wantToken)
+			}
 		})
 	}
 }
