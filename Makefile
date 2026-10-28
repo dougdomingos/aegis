@@ -1,9 +1,15 @@
-.PHONY: init tests coverage test-report help
+.PHONY: init tests coverage test-report e2e build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
 TEST_PACKAGES = ./internal/store \
 	./internal/service \
+	./internal/config \
+	./internal/auth \
+	./internal/api \
+	./internal/sentinel/config \
+	./internal/sentinel/identity \
+	./internal/sentinel/client \
 	./internal/infra/migrations \
 	./internal/infra/query \
 	./internal/api/handler \
@@ -16,6 +22,11 @@ init: ## Install utility tools for development lifecycle
 	go install golang.org/x/tools/cmd/goimports@latest
 	lefthook install
 
+build: ## Build both binaries into ./bin
+	@mkdir -p bin
+	@go build -o bin/aegis-orchestrator ./cmd/orchestrator
+	@go build -o bin/aegis-sentinel ./cmd/sentinel
+
 tests: ## Run all tests and report errors only
 	@go test -short $(TEST_PACKAGES)
 
@@ -26,7 +37,10 @@ coverage: ## Run all tests and compute coverage
 test-report: ## Run all tests and yield report as HTML
 	@go test -v -json -coverprofile=coverage.out $(TEST_PACKAGES) | test-prettify --cov-prof coverage.out
 
+e2e: ## Run the end-to-end suite with Testcontainers (requires Docker)
+	@go test -tags e2e -timeout 30m -v ./e2e/...
+
 help: ## Show help for each make command
 	@echo 'Makefile commands:'
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'

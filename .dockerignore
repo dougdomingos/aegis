@@ -1,0 +1,9 @@
+.git
+.github
+.superpowers
+docs
+bin
+collections
+coverage.out
+sentinel.config.example.json
+e2e/*_test.go

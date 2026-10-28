@@ -11,24 +11,63 @@ import (
 	"time"
 
 	"dougdomingos.com/aegis/internal/api"
+	"dougdomingos.com/aegis/internal/config"
 	"dougdomingos.com/aegis/internal/infra"
 )
 
 const (
-	serverAddress   = ":8080"
+	// envServerAddress is the environment variable overriding the address the
+	// API server binds to.
+	envServerAddress = "AEGIS_ADDR"
+
+	// envDatabasePath is the environment variable holding the path of the
+	// SQLite database file.
+	envDatabasePath = "AEGIS_DB"
+
+	// defaultServerAddress is the address the API server binds to when the
+	// environment does not override it.
+	defaultServerAddress = ":8080"
+
+	// defaultDatabasePath is the location of the SQLite database file when the
+	// environment does not override it.
+	defaultDatabasePath = "/tmp/aegis.db"
+
 	shutdownTimeout = 5 * time.Second
 )
 
+// envOrDefault reads the provided environment variable, falling back to the
+// provided default when it is unset or blank.
+func envOrDefault(name, fallback string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+
+	return value
+}
+
 func main() {
-	db, err := infra.InitDB("/tmp/aegis.db")
+	serverAddress := envOrDefault(envServerAddress, defaultServerAddress)
+
+	db, err := infra.InitDB(envOrDefault(envDatabasePath, defaultDatabasePath))
 	if err != nil {
 		log.Fatalf("failed to initialize database: %v", err)
 	}
 	defer db.Close()
 
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	router, err := api.NewRouter(db, cfg)
+	if err != nil {
+		log.Fatalf("failed to initialize router: %v", err)
+	}
+
 	srv := &http.Server{
 		Addr:              serverAddress,
-		Handler:           api.NewRouter(db),
+		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

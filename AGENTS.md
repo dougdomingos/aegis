@@ -13,8 +13,9 @@ using a two-tier architecture:
 - **Orchestrator** (`cmd/orchestrator`): Central control plane exposing a REST
   API (chi + SQLite) for rule storage, policy definition, logical group
   management, and real-time config distribution.
-- **Sentinel** (not yet implemented): Lightweight per-endpoint daemon that
-  receives policies and enforces kernel-level filtering.
+- **Sentinel** (`cmd/sentinel`): Lightweight per-endpoint daemon that loads its
+  configuration, detects its identity, authenticates with the Orchestrator at
+  startup and runs until it is signalled.
 
 ### 1.1. Environment & Tech Stack
 
@@ -27,16 +28,19 @@ using a two-tier architecture:
 
 ### 2.1. Directory Layout
 
-| Path                | Responsibility                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `cmd/`              | Entrypoints (e.g., `cmd/orchestrator/main.go`).                                                               |
-| `internal/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes. |
-| `internal/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                           |
-| `internal/errors/`  | Package-level sentinel errors only.                                                                           |
-| `internal/schemas/` | Request/response DTOs used at the API boundary.                                                               |
-| `internal/service/` | Business logic orchestration; depends on store interfaces.                                                    |
-| `internal/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                               |
-| `internal/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities). |
+| Path                | Responsibility                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `cmd/`              | Entrypoints (e.g., `cmd/orchestrator/main.go`).                                                                          |
+| `cmd/sentinel/`     | The Sentinel entrypoint.                                                                                                 |
+| `internal/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes.   |
+| `internal/auth/`    | Shared authentication primitives (canonical payload, HMAC sign/verify) used by the Orchestrator and the Sentinel.        |
+| `internal/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                                      |
+| `internal/errors/`  | Package-level sentinel errors only.                                                                                      |
+| `internal/schemas/` | Request/response DTOs used at the API boundary.                                                                          |
+| `internal/service/` | Business logic orchestration; depends on store interfaces.                                                               |
+| `internal/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                                          |
+| `internal/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities).            |
+| `internal/sentinel/`| The Sentinel's configuration, identity, client, daemon and logging packages.                                             |
 
 ### 2.2. Layers and Dependency Flow
 
@@ -48,6 +52,9 @@ implementations:
 ```
 # Orchestrator dependency flow
 API Handler ──> Service ──> Store ──> SQLite
+
+# Sentinel dependency flow
+Sentinel Client ──> Orchestrator API
 ```
 
 Interfaces are owned by their consumers: `*ServiceInterface` contracts are
@@ -66,9 +73,27 @@ assigned task:
 # Install required dependencies and tools
 make init
 
-# Execute tests with coverage profile
-make test-coverage
+# Run all tests, reporting errors only
+make tests
+
+# Run all tests and compute coverage
+make coverage
+
+# Run all tests and yield an HTML coverage report
+make test-report
+
+# Run the end-to-end suite with Testcontainers against the real binaries in
+# containers (requires Docker)
+make e2e
+
+# List every available target
+make help
 ```
+
+> **Note:** `tests`, `coverage`, and `test-report` only exercise the packages
+> listed in the `TEST_PACKAGES` variable of the `Makefile`, which keeps the
+> untested packages out of the coverage profile. Extend that variable when a new
+> package gains tests.
 
 ### 3.1. Git Hooks (Lefthook)
 
