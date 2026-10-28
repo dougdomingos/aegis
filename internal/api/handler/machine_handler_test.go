@@ -155,3 +155,46 @@ func TestMachineHandler_Authenticate_WithMalformedPayload_ReturnsStatus400(t *te
 	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodPost, "/machines/authenticate", "invalid json")
 	assertStatusCode(t, rec, http.StatusBadRequest)
 }
+
+// ============================================================================
+// Heartbeat (POST /machines/heartbeat)
+// ============================================================================
+
+func TestMachineHandler_Heartbeat_ValidBearerToken_ReturnsNoContent(t *testing.T) {
+	mock := &mockMachineService{
+		heartbeatFn: func(_ context.Context, token string) error {
+			return nil
+		},
+	}
+
+	rec := performBearerRequest(t, setupMachineRouter(t, mock), "session-token")
+	assertStatusCode(t, rec, http.StatusNoContent)
+}
+
+func TestMachineHandler_Heartbeat_InvalidToken_ReturnsUnauthorized(t *testing.T) {
+	scenarios := map[string]struct {
+		header    string
+		expectErr error
+	}{
+		"expired token":  {header: "Bearer expired-token", expectErr: machineErrors.ErrSessionTokenInvalid},
+		"missing header": {header: "", expectErr: machineErrors.ErrSessionTokenInvalid},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			mock := &mockMachineService{
+				heartbeatFn: func(_ context.Context, token string) error {
+					return scenario.expectErr
+				},
+			}
+
+			rec, req := buildTestRequest(http.MethodPost, "/machines/heartbeat", nil)
+			if scenario.header != "" {
+				req.Header.Set("Authorization", scenario.header)
+			}
+
+			setupMachineRouter(t, mock).ServeHTTP(rec, req)
+			assertStatusCode(t, rec, http.StatusUnauthorized)
+		})
+	}
+}
