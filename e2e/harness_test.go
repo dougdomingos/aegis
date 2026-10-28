@@ -134,10 +134,16 @@ func newFleet(t *testing.T, machineCount int) *fleet {
 	return &fleet{t: t, network: nw, machineCount: machineCount}
 }
 
+// orchestratorOptions carries per-test overrides for the Orchestrator boot.
+type orchestratorOptions struct {
+	// env holds extra environment variables merged over the defaults.
+	env map[string]string
+}
+
 // startOrchestrator boots the real Orchestrator container on the fleet network
 // with the planned static IP, the injected lab key and machines registry, and
 // its API port published to the host, waiting for it to serve /machines.
-func (f *fleet) startOrchestrator(t *testing.T) testcontainers.Container {
+func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) testcontainers.Container {
 	t.Helper()
 
 	registry := "ip,name\n"
@@ -145,13 +151,20 @@ func (f *fleet) startOrchestrator(t *testing.T) testcontainers.Container {
 		registry += fmt.Sprintf("%s,%s\n", sentinelIP(i), machineName(i))
 	}
 
+	env := map[string]string{
+		"AEGIS_LAB_KEY":        labKeyPath,
+		"AEGIS_SESSION_SECRET": sessionSecret,
+		"AEGIS_MACHINES":       machinesFilePath,
+		"AEGIS_DB":             "/home/nonroot/aegis.db",
+	}
+	for _, opt := range opts {
+		for key, value := range opt.env {
+			env[key] = value
+		}
+	}
+
 	c, err := testcontainers.Run(context.Background(), e2eImage,
-		testcontainers.WithEnv(map[string]string{
-			"AEGIS_LAB_KEY":        labKeyPath,
-			"AEGIS_SESSION_SECRET": sessionSecret,
-			"AEGIS_MACHINES":       machinesFilePath,
-			"AEGIS_DB":             "/home/nonroot/aegis.db",
-		}),
+		testcontainers.WithEnv(env),
 		testcontainers.WithFiles(
 			injectedFile(labKeyPath, validLabKeyHex+"\n"),
 			injectedFile(machinesFilePath, registry),
@@ -253,15 +266,29 @@ type sentinelHandle struct {
 	name      string
 }
 
+// sentinelOptions carries per-test overrides for the Sentinel boot.
+type sentinelOptions struct {
+	// heartbeatInterval is injected as the Sentinel heartbeat_interval field
+	// when non-empty.
+	heartbeatInterval string
+}
+
 // startSentinel boots the real Sentinel container with the planned static IP
 // at index, its lab key and JSON configuration injected in-memory, pointing at
 // the Orchestrator's planned address. No wait strategy runs: the process may
 // exit on purpose.
-func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string) *sentinelHandle {
+func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string, opts ...sentinelOptions) *sentinelHandle {
 	t.Helper()
 
-	config := fmt.Sprintf(`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q}`,
-		orchestratorIP, labKeyPath)
+	interval := ""
+	for _, opt := range opts {
+		if opt.heartbeatInterval != "" {
+			interval = fmt.Sprintf(", \"heartbeat_interval\": %q", opt.heartbeatInterval)
+		}
+	}
+
+	config := fmt.Sprintf(`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q%s}`,
+		orchestratorIP, labKeyPath, interval)
 
 	c, err := testcontainers.Run(context.Background(), e2eImage,
 		testcontainers.WithEntrypoint("/usr/local/bin/aegis-sentinel", "--config", sentinelConfigPath),
@@ -391,6 +418,55 @@ func (f *fleet) waitForConnected(t *testing.T, ips []string, timeout time.Durati
 	}
 
 	t.Fatalf("the fleet did not reach CONNECTED within %v; statuses: %v", timeout, f.statuses(t))
+}
+
+// waitForDisconnected blocks until the provided machine IP reports
+// DISCONNECTED in the registry, reporting the full status map on timeout.
+func (f *fleet) waitForDisconnected(t *testing.T, ip string, timeout time.Duration) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if f.statuses(t)[ip] == "DISCONNECTED" {
+			return
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	t.Fatalf("the machine %s did not reach DISCONNECTED within %v; statuses: %v",
+		ip, timeout, f.statuses(t))
+}
+
+// postHeartbeat sends a host-side heartbeat request with the provided bearer
+// token to the running Orchestrator and returns the response status code.
+func (f *fleet) postHeartbeat(t *testing.T, token string) int {
+	t.Helper()
+
+	ctx := context.Background()
+
+	endpoint, err := f.orchestrator.PortEndpoint(ctx, orchestratorPort, "http")
+	if err != nil {
+		t.Fatalf("failed to resolve the orchestrator endpoint: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/machines/heartbeat", nil)
+	if err != nil {
+		t.Fatalf("failed to build the heartbeat request: %v", err)
+	}
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("heartbeat request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	return resp.StatusCode
 }
 
 // statuses maps every registry machine IP to its current status string.
