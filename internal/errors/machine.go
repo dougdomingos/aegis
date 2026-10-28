@@ -11,4 +11,8 @@ var (
 	// either because its IP is not a configured source or because the shared
 	// token is incorrect.
 	ErrInvalidCredentials = errors.New("invalid machine credentials")
+
+	// ErrSessionTokenInvalid is returned when a session token presented to the
+	// system is malformed, tampered with, or expired.
+	ErrSessionTokenInvalid = errors.New("invalid session token")
 )

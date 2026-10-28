@@ -2,11 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"fmt"
 	"strings"
 	"time"
 
@@ -134,7 +130,7 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 		return nil, err
 	}
 
-	sessionToken, expiresAt, err := issueSessionToken(connected.ID, service.sessionSecret, service.sessionTTL, service.now())
+	sessionToken, expiresAt, err := auth.SignSessionToken(connected.ID, service.sessionSecret, service.sessionTTL, service.now())
 	if err != nil {
 		return nil, err
 	}
@@ -144,22 +140,6 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 		ExpiresAt:    expiresAt,
 		Machine:      *mapMachineToOutputSchema(connected),
 	}, nil
-}
-
-// issueSessionToken builds an HMAC-SHA256-signed session token encoding the
-// machine ID and its expiry, and returns the token along with the expiry
-// timestamp.
-func issueSessionToken(machineID int64, secret string, ttl time.Duration, now time.Time) (string, time.Time, error) {
-	expiresAt := now.Add(ttl)
-	payload := fmt.Sprintf("%d:%d", machineID, expiresAt.Unix())
-
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(payload))
-
-	token := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
-		base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-
-	return token, expiresAt, nil
 }
 
 // mapMachineToOutputSchema converts the Machine entity format into the output
