@@ -221,3 +221,33 @@ func TestMachineStore_Touch_WithExistingMachine_UpdatesStatusMACAndLastSeen(t *t
 		t.Error("expected last_seen_at to be populated")
 	}
 }
+
+func TestMachineStore_Touch_EmptyMAC_PreservesStoredMAC(t *testing.T) {
+	ctx, store := arrangeStoreTest(t, store.NewMachineStore)
+
+	created, err := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	if err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
+	}
+
+	if _, err := store.Touch(ctx, created.ID, "aa:bb:cc:dd:ee:ff", domain.ConnectedStatus); err != nil {
+		t.Fatalf("failed to seed machine MAC: %v", err)
+	}
+
+	touched, err := store.Touch(ctx, created.ID, "", domain.ConnectedStatus)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if touched.MAC != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("expected stored MAC to be preserved, got %q", touched.MAC)
+	}
+
+	if touched.Status != domain.ConnectedStatus {
+		t.Errorf("expected status %q, got %q", domain.ConnectedStatus, touched.Status)
+	}
+
+	if touched.LastSeenAt == nil {
+		t.Error("expected last_seen_at to be populated")
+	}
+}

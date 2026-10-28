@@ -16,7 +16,7 @@ const (
 	queryGetMachineByID    = "SELECT id, name, ip, mac, status, last_seen_at, created_at FROM machines WHERE id = ?"
 	queryGetAllMachines    = "SELECT id, name, ip, mac, status, last_seen_at, created_at FROM machines"
 	queryDeleteMachineByIP = "DELETE FROM machines WHERE ip = ?"
-	queryTouchMachine      = "UPDATE machines SET mac = ?, status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?"
+	queryTouchMachine      = "UPDATE machines SET mac = CASE WHEN ? = '' THEN mac ELSE ? END, status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?"
 )
 
 // MachineStore manages all database-related operations over machines.
@@ -95,7 +95,7 @@ func (store *MachineStore) Sync(ctx context.Context, machines []domain.Machine) 
 // Touch updates the connection state and last-seen timestamp of the machine
 // whose ID matches the provided argument.
 func (store *MachineStore) Touch(ctx context.Context, id int64, mac string, status domain.MachineStatus) (*domain.Machine, error) {
-	result, err := store.executor.Exec(ctx, queryTouchMachine, mac, status, id)
+	result, err := store.executor.Exec(ctx, queryTouchMachine, mac, mac, status, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to touch machine %d: %w", id, err)
 	}

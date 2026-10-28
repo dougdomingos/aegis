@@ -121,7 +121,10 @@ func (mock *MockMachineStore) Touch(ctx context.Context, id int64, mac string, s
 
 	for _, machine := range mock.machines {
 		if machine.ID == id {
-			machine.MAC = mac
+			if mac != "" {
+				machine.MAC = mac
+			}
+
 			machine.Status = status
 			now := time.Now()
 			machine.LastSeenAt = &now
