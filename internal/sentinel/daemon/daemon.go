@@ -33,9 +33,10 @@ type Task struct {
 	// Name identifies the task in log records.
 	Name string
 
-	// Run executes the task until the context is cancelled. A non-nil error
-	// is fatal and stops the daemon.
-	Run func(ctx context.Context) error
+	// Run executes the task until the context is cancelled, receiving the
+	// session authenticated at startup. A non-nil error is fatal and stops
+	// the daemon.
+	Run func(ctx context.Context, session *Session) error
 }
 
 // Session holds the outcome of a successful authentication.
@@ -49,6 +50,12 @@ type Session struct {
 
 	// MachineName is the name assigned to the machine by the Orchestrator.
 	MachineName string
+
+	// IP is the canonical identity the machine authenticated with.
+	IP string
+
+	// MAC is the hardware address reported by the machine, if any.
+	MAC string
 }
 
 // Daemon owns the lifecycle of the Sentinel process.
@@ -105,7 +112,7 @@ func (daemon *Daemon) Run(ctx context.Context) error {
 	errCh := make(chan error, len(daemon.tasks))
 	for _, task := range daemon.tasks {
 		go func(task Task) {
-			if err := task.Run(ctx); err != nil {
+			if err := task.Run(ctx, session); err != nil {
 				errCh <- fmt.Errorf("task %q failed: %w", task.Name, err)
 			}
 		}(task)

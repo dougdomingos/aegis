@@ -88,6 +88,8 @@ func (c *Client) Authenticate(ctx context.Context, id identity.Identity) (*daemo
 		Token:       authenticated.SessionToken,
 		ExpiresAt:   authenticated.ExpiresAt,
 		MachineName: authenticated.Machine.Name,
+		IP:          id.IP,
+		MAC:         id.MAC,
 	}, nil
 }
 

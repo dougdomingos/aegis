@@ -73,6 +73,14 @@ func TestClient_Authenticate_WithValidChallenge_ReturnsSession(t *testing.T) {
 		t.Errorf("session.MachineName = %q, want lcc1-001", session.MachineName)
 	}
 
+	if session.IP != testIdentity.IP {
+		t.Errorf("session.IP = %q, want %q", session.IP, testIdentity.IP)
+	}
+
+	if session.MAC != testIdentity.MAC {
+		t.Errorf("session.MAC = %q, want %q", session.MAC, testIdentity.MAC)
+	}
+
 	expectedSignature := hex.EncodeToString(auth.Sign(labKey, auth.CanonicalPayload("10.0.1.11", "abc123")))
 	if receivedSignature != expectedSignature {
 		t.Errorf("received signature = %q, want %q", receivedSignature, expectedSignature)
