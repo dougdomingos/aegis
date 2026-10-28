@@ -31,6 +31,11 @@ const (
 	// defaultHeartbeatInterval is the default period between connectivity
 	// heartbeats when the configuration does not override it.
 	defaultHeartbeatInterval = 30 * time.Second
+
+	// maxHeartbeatInterval mirrors the Orchestrator's machine staleness grace
+	// (90s): an interval equal to or longer than it would leave a machine
+	// displayed as DISCONNECTED between heartbeats that always succeed.
+	maxHeartbeatInterval = 90 * time.Second
 )
 
 // Config holds the Sentinel daemon configuration.
@@ -228,6 +233,10 @@ func parseHeartbeatInterval(raw string) (time.Duration, error) {
 
 	if interval <= 0 {
 		return 0, fmt.Errorf("invalid heartbeat_interval: must be positive")
+	}
+
+	if interval >= maxHeartbeatInterval {
+		return 0, fmt.Errorf("invalid heartbeat_interval: must be shorter than %v, the Orchestrator staleness grace", maxHeartbeatInterval)
 	}
 
 	return interval, nil

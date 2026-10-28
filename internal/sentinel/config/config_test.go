@@ -268,9 +268,11 @@ func TestConfig_Load_HeartbeatInterval_InvalidValues_ReturnError(t *testing.T) {
 	cases := map[string]struct {
 		interval string
 	}{
-		"malformed": {interval: "soon"},
-		"zero":      {interval: "0s"},
-		"negative":  {interval: "-5s"},
+		"malformed":                {interval: "soon"},
+		"zero":                     {interval: "0s"},
+		"negative":                 {interval: "-5s"},
+		"exceeds staleness grace":  {interval: "2m"},
+		"equal to staleness grace": {interval: "90s"},
 	}
 
 	for name, tc := range cases {
