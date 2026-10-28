@@ -27,6 +27,10 @@ const (
 	// defaultLogFormat is the default log format name used when the
 	// configuration does not override it.
 	defaultLogFormat = "text"
+
+	// defaultHeartbeatInterval is the default period between connectivity
+	// heartbeats when the configuration does not override it.
+	defaultHeartbeatInterval = 30 * time.Second
 )
 
 // Config holds the Sentinel daemon configuration.
@@ -41,6 +45,10 @@ type Config struct {
 	// RequestTimeout bounds each request made to the Orchestrator.
 	RequestTimeout time.Duration
 
+	// HeartbeatInterval is the period between connectivity heartbeats sent
+	// to the Orchestrator.
+	HeartbeatInterval time.Duration
+
 	// LogLevel is the minimum severity of the emitted log records.
 	LogLevel slog.Level
 
@@ -50,11 +58,12 @@ type Config struct {
 
 // document mirrors the JSON configuration file schema.
 type document struct {
-	OrchestratorURL string `json:"orchestrator_url"`
-	LabKeyPath      string `json:"lab_key_path"`
-	RequestTimeout  string `json:"request_timeout"`
-	LogLevel        string `json:"log_level"`
-	LogFormat       string `json:"log_format"`
+	OrchestratorURL   string `json:"orchestrator_url"`
+	LabKeyPath        string `json:"lab_key_path"`
+	RequestTimeout    string `json:"request_timeout"`
+	HeartbeatInterval string `json:"heartbeat_interval"`
+	LogLevel          string `json:"log_level"`
+	LogFormat         string `json:"log_format"`
 }
 
 // Load reads and validates the Sentinel daemon configuration from the file
@@ -88,6 +97,11 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	heartbeatInterval, err := parseHeartbeatInterval(doc.HeartbeatInterval)
+	if err != nil {
+		return nil, err
+	}
+
 	logLevel, err := parseLogLevel(doc.LogLevel)
 	if err != nil {
 		return nil, err
@@ -99,11 +113,12 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &Config{
-		OrchestratorURL: orchestratorURL,
-		LabKey:          labKey,
-		RequestTimeout:  requestTimeout,
-		LogLevel:        logLevel,
-		LogFormat:       logFormat,
+		OrchestratorURL:   orchestratorURL,
+		LabKey:            labKey,
+		RequestTimeout:    requestTimeout,
+		HeartbeatInterval: heartbeatInterval,
+		LogLevel:          logLevel,
+		LogFormat:         logFormat,
 	}, nil
 }
 
@@ -196,4 +211,24 @@ func parseLogFormat(raw string) (logging.Format, error) {
 	}
 
 	return format, nil
+}
+
+// parseHeartbeatInterval parses the heartbeat interval, falling back to the
+// default when it is unset.
+func parseHeartbeatInterval(raw string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultHeartbeatInterval, nil
+	}
+
+	interval, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("invalid heartbeat_interval: %w", err)
+	}
+
+	if interval <= 0 {
+		return 0, fmt.Errorf("invalid heartbeat_interval: must be positive")
+	}
+
+	return interval, nil
 }
