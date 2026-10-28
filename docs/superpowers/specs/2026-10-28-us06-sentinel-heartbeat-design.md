@@ -316,3 +316,15 @@ Follows the vertical-slice conventions of AGENTS.md.
   work starts.
 - Configurable staleness grace on the Orchestrator, only if deployment shows
   the 90s default is wrong.
+
+## 13. Amendment — configurable staleness grace (2026-10-28)
+
+The §3/§6.3 fixed 90s grace became `AEGIS_STALENESS_GRACE` (Go duration,
+default `90s`, must be positive), injected into `MachineService` via its
+constructor and wired from `internal/config`, mirroring `AEGIS_SESSION_TTL`.
+Rationale: an unconfigurable grace made the system-level stale-display
+behavior untestable without a 90-second E2E wait, and the knob follows an
+established pattern. The Sentinel-side upper bound (`heartbeat_interval` must
+be shorter than 90s) keeps validating against the default grace: deployments
+that shorten the grace must also configure shorter Sentinel intervals, which
+the fleet already does per-machine.

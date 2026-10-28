@@ -75,6 +75,61 @@ func TestConfig_Load_WithCustomTTL_ReturnsConfiguredTTL(t *testing.T) {
 	}
 }
 
+func TestConfig_Load_WithUnsetGrace_DefaultsToNinetySeconds(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.StalenessGrace != 90*time.Second {
+		t.Errorf("expected default grace %v, got %v", 90*time.Second, cfg.StalenessGrace)
+	}
+}
+
+func TestConfig_Load_WithCustomGrace_ReturnsConfiguredGrace(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
+	t.Setenv("AEGIS_STALENESS_GRACE", "10s")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.StalenessGrace != 10*time.Second {
+		t.Errorf("expected grace %v, got %v", 10*time.Second, cfg.StalenessGrace)
+	}
+}
+
+func TestConfig_Load_WithInvalidGrace_ReturnsError(t *testing.T) {
+	cases := map[string]struct {
+		grace string
+	}{
+		"malformed": {grace: "soon"},
+		"zero":      {grace: "0s"},
+		"negative":  {grace: "-5s"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+			t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+			t.Setenv("AEGIS_STALENESS_GRACE", tc.grace)
+
+			if _, err := config.Load(); err == nil {
+				t.Errorf("expected an error for grace %q, got nil", tc.grace)
+			} else if !strings.Contains(err.Error(), "AEGIS_STALENESS_GRACE") {
+				t.Errorf("expected error to mention AEGIS_STALENESS_GRACE, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestConfig_Load_WithoutLabKey_ReturnsError(t *testing.T) {
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
 

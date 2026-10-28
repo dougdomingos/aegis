@@ -15,11 +15,6 @@ import (
 	"dougdomingos.com/aegis/internal/store"
 )
 
-// machineStalenessGrace is how long a machine remains displayed as CONNECTED
-// after its last heartbeat, covering three consecutive beats of the default
-// Sentinel heartbeat interval.
-const machineStalenessGrace = 90 * time.Second
-
 // MachineService provides all operations needed to manage machine
 // authentication in the system.
 type MachineService struct {
@@ -37,6 +32,10 @@ type MachineService struct {
 	// sessionTTL is the lifetime of an issued session token.
 	sessionTTL time.Duration
 
+	// stalenessGrace is the duration a machine remains displayed as CONNECTED
+	// after its last heartbeat.
+	stalenessGrace time.Duration
+
 	// nonces tracks the pending authentication challenges per machine IP.
 	nonces *store.NonceStore
 
@@ -46,14 +45,15 @@ type MachineService struct {
 
 // NewMachineService creates a new service instance with the provided store
 // provider and authentication secrets.
-func NewMachineService(machineStore domain.MachineStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, now func() time.Time) *MachineService {
+func NewMachineService(machineStore domain.MachineStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
 	return &MachineService{
-		store:         machineStore,
-		labKey:        labKey,
-		sessionSecret: sessionSecret,
-		sessionTTL:    sessionTTL,
-		nonces:        store.NewNonceStore(now),
-		now:           now,
+		store:          machineStore,
+		labKey:         labKey,
+		sessionSecret:  sessionSecret,
+		sessionTTL:     sessionTTL,
+		stalenessGrace: stalenessGrace,
+		nonces:         store.NewNonceStore(now),
+		now:            now,
 	}
 }
 
@@ -73,7 +73,7 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 
 	output := make([]schemas.MachineOutputSchema, 0, len(machines))
 	for i := range machines {
-		output = append(output, *mapMachineToOutputSchema(&machines[i], service.now()))
+		output = append(output, *mapMachineToOutputSchema(&machines[i], service.now(), service.stalenessGrace))
 	}
 
 	return output, nil
@@ -145,7 +145,7 @@ func (service *MachineService) Authenticate(ctx context.Context, payload schemas
 	return &schemas.AuthenticateOutputSchema{
 		SessionToken: sessionToken,
 		ExpiresAt:    expiresAt,
-		Machine:      *mapMachineToOutputSchema(connected, service.now()),
+		Machine:      *mapMachineToOutputSchema(connected, service.now(), service.stalenessGrace),
 	}, nil
 }
 
@@ -169,13 +169,13 @@ func (service *MachineService) Heartbeat(ctx context.Context, token string) erro
 // schema provided by this service, deriving the displayed status from the
 // freshness of the machine's last-seen timestamp. Returns nil if the provided
 // machine is nil.
-func mapMachineToOutputSchema(machine *domain.Machine, now time.Time) *schemas.MachineOutputSchema {
+func mapMachineToOutputSchema(machine *domain.Machine, now time.Time, grace time.Duration) *schemas.MachineOutputSchema {
 	if machine == nil {
 		return nil
 	}
 
 	status := domain.DisconnectedStatus
-	if machine.LastSeenAt != nil && now.Sub(*machine.LastSeenAt) <= machineStalenessGrace {
+	if machine.LastSeenAt != nil && now.Sub(*machine.LastSeenAt) <= grace {
 		status = domain.ConnectedStatus
 	}
 

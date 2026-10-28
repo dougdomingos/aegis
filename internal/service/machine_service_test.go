@@ -676,6 +676,44 @@ func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T
 	}
 }
 
+func TestMachineService_ListMachines_ConfiguredGraceMarksMachineStaleEarlier(t *testing.T) {
+	mockStore := NewMockMachineStore()
+	clock := newTestClock()
+	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
+
+	ctx := context.Background()
+	if err := svc.SyncMachines(ctx, []domain.Machine{
+		{IP: "10.0.1.11", Name: "lcc1-011"},
+	}); err != nil {
+		t.Fatalf("failed to seed machines: %v", err)
+	}
+
+	machine, err := mockStore.GetByIP(ctx, "10.0.1.11")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	token, _, err := auth.SignSessionToken(machine.ID, "sign-secret", 24*time.Hour, clock.Now())
+	if err != nil {
+		t.Fatalf("failed to sign session token: %v", err)
+	}
+
+	if err := svc.Heartbeat(ctx, token); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	clock.Advance(11 * time.Second)
+
+	listed, err := svc.ListMachines(ctx)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if listed[0].Status != string(domain.DisconnectedStatus) {
+		t.Errorf("expected status %q after 11s with a 10s grace, got %q", domain.DisconnectedStatus, listed[0].Status)
+	}
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -694,7 +732,7 @@ func arrangeMachineServiceTest(t *testing.T) (context.Context, *MockMachineStore
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
 	ctx := context.Background()
-	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, clock.Now)
+	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
 
 	return ctx, mockStore, svc, clock
 }
