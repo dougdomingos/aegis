@@ -21,6 +21,8 @@ type GroupServiceInterface interface {
 	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
 	LinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
 	UnlinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
+	LinkPolicy(ctx context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error)
+	UnlinkPolicy(ctx context.Context, groupName string) (*schemas.GroupOutputSchema, error)
 }
 
 // GroupHandler implements the methods that map HTTP requests into operations
@@ -43,6 +45,8 @@ func (handler *GroupHandler) RegisterRoutes(r chi.Router) {
 		r.Patch("/rename", handler.Rename)
 		r.Post("/{name}/machines", handler.LinkMachine)
 		r.Delete("/{name}/machines/{machineID}", handler.UnlinkMachine)
+		r.Post("/{name}/policy", handler.LinkPolicy)
+		r.Delete("/{name}/policy", handler.UnlinkPolicy)
 		r.Delete("/{name}", handler.Delete)
 	})
 }
@@ -177,6 +181,50 @@ func (handler *GroupHandler) UnlinkMachine(w http.ResponseWriter, r *http.Reques
 			errors.ErrGroupNotFound:     http.StatusNotFound,
 			errors.ErrMachineNotFound:   http.StatusNotFound,
 			errors.ErrMachineNotInGroup: http.StatusNotFound,
+		})
+
+		return
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+// LinkPolicy associates the policy named in the request body with the group
+// named in the request path, replacing any previously linked policy.
+func (handler *GroupHandler) LinkPolicy(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var payload schemas.LinkPolicyToGroupSchema
+	if !utils.DecodePayload(w, r, &payload) {
+		return
+	}
+
+	res, err := handler.service.LinkPolicy(r.Context(), name, payload.PolicyName)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrGroupNameRequired:  http.StatusBadRequest,
+			errors.ErrPolicyNameRequired: http.StatusBadRequest,
+			errors.ErrGroupNotFound:      http.StatusNotFound,
+			errors.ErrPolicyNotFound:     http.StatusNotFound,
+		})
+
+		return
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+// UnlinkPolicy removes the association between the group named in the request
+// path and its currently linked policy.
+func (handler *GroupHandler) UnlinkPolicy(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	res, err := handler.service.UnlinkPolicy(r.Context(), name)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrGroupNameRequired:      http.StatusBadRequest,
+			errors.ErrGroupNotFound:          http.StatusNotFound,
+			errors.ErrGroupNotLinkedToPolicy: http.StatusNotFound,
 		})
 
 		return
