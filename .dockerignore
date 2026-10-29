@@ -5,5 +5,5 @@ docs
 bin
 collections
 coverage.out
-sentinel.config.example.json
+examples/sentinel.config.json
 e2e/*_test.go
