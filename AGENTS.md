@@ -32,14 +32,13 @@ using a two-tier architecture:
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `cmd/`              | Entrypoints (e.g., `cmd/orchestrator/main.go`).                                                                          |
 | `cmd/sentinel/`     | The Sentinel entrypoint.                                                                                                 |
-| `internal/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes.   |
-| `internal/auth/`    | Shared authentication primitives (canonical payload, HMAC sign/verify) used by the Orchestrator and the Sentinel.        |
-| `internal/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                                      |
-| `internal/errors/`  | Package-level sentinel errors only.                                                                                      |
-| `internal/schemas/` | Request/response DTOs used at the API boundary.                                                                          |
-| `internal/service/` | Business logic orchestration; depends on store interfaces.                                                               |
-| `internal/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                                          |
-| `internal/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities).            |
+| `internal/common/`  | Packages shared by the Orchestrator and the Sentinel (`auth/`, `errors/`, `schemas/`).                                   |
+| `internal/orchestrator/api/`     | HTTP layer: `router.go` (DI/wiring), `handler/`, `middleware/`, `utils/`. Declares the service interfaces it consumes. |
+| `internal/orchestrator/config/`  | Orchestrator configuration loaded from environment variables.                                                          |
+| `internal/orchestrator/domain/`  | Entities, value validation, builders, and store interfaces. No I/O.                                                    |
+| `internal/orchestrator/service/` | Business logic orchestration; depends on store interfaces.                                                             |
+| `internal/orchestrator/store/`   | SQLite persistence implementing the `domain.*Store` interfaces.                                                        |
+| `internal/orchestrator/infra/`   | `database.go` (DB init), `migrations/` (registry + `sql/` files), `query/` (ORM-like interface for entities).          |
 | `internal/sentinel/`| The Sentinel's configuration, identity, client, daemon and logging packages.                                             |
 
 ### 2.2. Layers and Dependency Flow
@@ -58,8 +57,8 @@ Sentinel Client ──> Orchestrator API
 ```
 
 Interfaces are owned by their consumers: `*ServiceInterface` contracts are
-declared in `internal/api/handler/` (the layer that consumes them), while
-`*Store` contracts are declared in `internal/domain/`. Services and stores
+declared in `internal/orchestrator/api/handler/` (the layer that consumes them),
+while `*Store` contracts are declared in `internal/orchestrator/domain/`. Services and stores
 satisfy these interfaces structurally; no layer depends on a concrete
 implementation.
 
