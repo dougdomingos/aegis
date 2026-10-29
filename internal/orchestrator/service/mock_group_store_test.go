@@ -138,3 +138,45 @@ func (mock *MockGroupStore) Remove(ctx context.Context, name string) error {
 	delete(mock.groups, group.ID)
 	return nil
 }
+
+// LinkToPolicy associates a group with the provided policy, replacing any
+// previous policy, or returns StoreErr if set.
+func (mock *MockGroupStore) LinkToPolicy(ctx context.Context, groupName string, policyID int64) (*domain.Group, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	group, err := mock.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, fmt.Errorf("group %s not found", groupName)
+	}
+
+	id := policyID
+	group.PolicyID = &id
+
+	return group, nil
+}
+
+// UnlinkFromPolicy clears the policy association of a group, or returns
+// StoreErr if set.
+func (mock *MockGroupStore) UnlinkFromPolicy(ctx context.Context, groupName string) (*domain.Group, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	group, err := mock.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, fmt.Errorf("group %s not found", groupName)
+	}
+
+	group.PolicyID = nil
+	group.PolicyName = ""
+
+	return group, nil
+}

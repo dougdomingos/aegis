@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -266,4 +267,153 @@ func TestGroupStore_Remove_WithInexistentGroup_RejectsRemoval(t *testing.T) {
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected 'not found' error, got: %v", err)
 	}
+}
+
+// ============================================================================
+// LinkToPolicy, UnlinkFromPolicy & Policy projection
+// ============================================================================
+
+func TestGroupStore_LinkToPolicy_WithValidNameAndID_SetsPolicyAndName(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+
+	linked, err := groupStore.LinkToPolicy(ctx, "lab1", policy.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if linked.PolicyID == nil || *linked.PolicyID != policy.ID {
+		t.Errorf("expected policy id %d, got %v", policy.ID, linked.PolicyID)
+	}
+	if linked.PolicyName != "default" {
+		t.Errorf("expected policy name %q, got %q", "default", linked.PolicyName)
+	}
+}
+
+func TestGroupStore_LinkToPolicy_WithInexistentGroup_ReturnsNotFound(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+
+	_, err := groupStore.LinkToPolicy(ctx, "unknown", policy.ID)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got: %v", err)
+	}
+}
+
+func TestGroupStore_LinkToPolicy_WithNewPolicy_ReplacesPreviousPolicy(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	first, _ := policyStore.Create(ctx, "first", domain.WhitelistPolicyType)
+	second, _ := policyStore.Create(ctx, "second", domain.BlacklistPolicyType)
+	_, _ = groupStore.LinkToPolicy(ctx, "lab1", first.ID)
+
+	linked, err := groupStore.LinkToPolicy(ctx, "lab1", second.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if linked.PolicyID == nil || *linked.PolicyID != second.ID {
+		t.Errorf("expected policy id %d, got %v", second.ID, linked.PolicyID)
+	}
+	if linked.PolicyName != "second" {
+		t.Errorf("expected policy name %q, got %q", "second", linked.PolicyName)
+	}
+}
+
+func TestGroupStore_UnlinkFromPolicy_WithLinkedGroup_ClearsPolicyID(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	_, _ = groupStore.LinkToPolicy(ctx, "lab1", policy.ID)
+
+	unlinked, err := groupStore.UnlinkFromPolicy(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if unlinked.PolicyID != nil {
+		t.Errorf("expected nil policy id, got %v", *unlinked.PolicyID)
+	}
+}
+
+func TestGroupStore_GetByName_WithLinkedGroup_ReturnsPolicyName(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	_, _ = groupStore.LinkToPolicy(ctx, "lab1", policy.ID)
+
+	found, err := groupStore.GetByName(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if found.PolicyName != "default" {
+		t.Errorf("expected policy name %q, got %q", "default", found.PolicyName)
+	}
+}
+
+func TestGroupStore_GetByName_WithUnlinkedGroup_ReturnsNilPolicy(t *testing.T) {
+	ctx, groupStore, _ := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+
+	found, err := groupStore.GetByName(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if found.PolicyID != nil {
+		t.Errorf("expected nil policy id, got %v", *found.PolicyID)
+	}
+	if found.PolicyName != "" {
+		t.Errorf("expected empty policy name, got %q", found.PolicyName)
+	}
+}
+
+func TestGroupStore_List_WithLinkedGroup_ReturnsPolicyName(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	_, _ = groupStore.LinkToPolicy(ctx, "lab1", policy.ID)
+
+	groups, err := groupStore.List(ctx)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(groups) != 1 || groups[0].PolicyName != "default" {
+		t.Errorf("expected one group linked to policy 'default', got %+v", groups)
+	}
+}
+
+func TestGroupStore_Remove_WithLinkedPolicy_KeepsPolicyPersisted(t *testing.T) {
+	ctx, groupStore, policyStore := arrangeGroupPolicyStoreTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	_, _ = groupStore.LinkToPolicy(ctx, "lab1", policy.ID)
+
+	if err := groupStore.Remove(ctx, "lab1"); err != nil {
+		t.Fatalf("expected group to be removed, got: %v", err)
+	}
+
+	found, err := policyStore.GetByName(ctx, "default")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected policy to remain persisted after group removal, got nil")
+	}
+}
+
+// arrangeGroupPolicyStoreTest builds group and policy stores over a migrated
+// database.
+func arrangeGroupPolicyStoreTest(t *testing.T) (context.Context, *store.GroupStore, *store.PolicyStore) {
+	t.Helper()
+
+	_, db := arrangeStoreDB(t)
+	return context.Background(), store.NewGroupStore(db), store.NewPolicyStore(db)
 }
