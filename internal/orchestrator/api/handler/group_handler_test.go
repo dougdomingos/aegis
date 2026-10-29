@@ -237,6 +237,83 @@ func TestGroupHandler_RemoveGroup_WithNonExistentGroup_ReturnsStatus404(t *testi
 }
 
 // ============================================================================
+// LinkMachine (POST /groups/{name}/machines)
+// ============================================================================
+
+func TestGroupHandler_LinkMachine_WithValidPayload_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		linkFn: func(_ context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+			return &schemas.MachineOutputSchema{ID: machineID}, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/machines", schemas.LinkMachineToGroupSchema{MachineID: 1})
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_LinkMachine_WithInexistentGroup_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		linkFn: func(_ context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/unknown/machines", schemas.LinkMachineToGroupSchema{MachineID: 1})
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_LinkMachine_WithInexistentMachine_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		linkFn: func(_ context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+			return nil, groupErrors.ErrMachineNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/machines", schemas.LinkMachineToGroupSchema{MachineID: 999})
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_LinkMachine_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
+	mock := &mockGroupService{}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/machines", "invalid json")
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+// ============================================================================
+// UnlinkMachine (DELETE /groups/{name}/machines/{machineID})
+// ============================================================================
+
+func TestGroupHandler_UnlinkMachine_WithValidPayload_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		unlinkFn: func(_ context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+			return &schemas.MachineOutputSchema{ID: machineID}, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/lab1/machines/1", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_UnlinkMachine_WithNotLinkedMachine_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		unlinkFn: func(_ context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+			return nil, groupErrors.ErrMachineNotInGroup
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/lab1/machines/1", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_UnlinkMachine_WithInvalidMachineID_ReturnsStatus400(t *testing.T) {
+	mock := &mockGroupService{}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/lab1/machines/not-a-number", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

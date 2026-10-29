@@ -18,6 +18,8 @@ type mockGroupService struct {
 	getByNameFn func(ctx context.Context, p schemas.GetGroupByNameSchema) (*schemas.GroupOutputSchema, error)
 	renameFn    func(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
 	removeFn    func(ctx context.Context, p schemas.RemoveGroupSchema) error
+	linkFn      func(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
+	unlinkFn    func(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
 }
 
 func (m *mockGroupService) CreateGroup(ctx context.Context, p schemas.CreateGroupSchema) (*schemas.GroupOutputSchema, error) {
@@ -38,4 +40,12 @@ func (m *mockGroupService) ChangeGroupName(ctx context.Context, p schemas.Change
 
 func (m *mockGroupService) RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error {
 	return m.removeFn(ctx, p)
+}
+
+func (m *mockGroupService) LinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+	return m.linkFn(ctx, groupName, machineID)
+}
+
+func (m *mockGroupService) UnlinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+	return m.unlinkFn(ctx, groupName, machineID)
 }
