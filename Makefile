@@ -2,19 +2,19 @@
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
-TEST_PACKAGES = ./internal/store \
-	./internal/service \
-	./internal/config \
-	./internal/auth \
-	./internal/api \
+TEST_PACKAGES = ./internal/orchestrator/store \
+	./internal/orchestrator/service \
+	./internal/orchestrator/config \
+	./internal/common/auth \
+	./internal/orchestrator/api \
 	./internal/sentinel/config \
 	./internal/sentinel/heartbeat \
 	./internal/sentinel/identity \
 	./internal/sentinel/client \
-	./internal/infra/migrations \
-	./internal/infra/query \
-	./internal/api/handler \
-	./internal/api/utils
+	./internal/orchestrator/infra/migrations \
+	./internal/orchestrator/infra/query \
+	./internal/orchestrator/api/handler \
+	./internal/orchestrator/api/utils
 
 init: ## Install utility tools for development lifecycle
 	go install github.com/evilmartians/lefthook@latest
