@@ -22,6 +22,10 @@ type GroupService struct {
 	// link and unlink machines to groups.
 	machineStore domain.MachineStore
 
+	// policyStore provides database operations related to policies, used to
+	// resolve and link policies to groups.
+	policyStore domain.PolicyStore
+
 	// stalenessGrace is the duration a machine remains displayed as CONNECTED
 	// after its last heartbeat.
 	stalenessGrace time.Duration
@@ -32,10 +36,11 @@ type GroupService struct {
 
 // NewGroupService creates a new service instance with the provided store
 // manager.
-func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
+func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
 	return &GroupService{
 		store:          store,
 		machineStore:   machineStore,
+		policyStore:    policyStore,
 		stalenessGrace: stalenessGrace,
 		now:            now,
 	}
@@ -237,6 +242,70 @@ func (service *GroupService) UnlinkMachine(ctx context.Context, groupName string
 	return mapMachineToOutputSchema(unlinked, service.now(), service.stalenessGrace), nil
 }
 
+// LinkPolicy associates the policy whose name matches the argument with the
+// group whose name matches the argument, replacing any previously linked
+// policy.
+func (service *GroupService) LinkPolicy(ctx context.Context, groupName string, policyName string) (*schemas.GroupOutputSchema, error) {
+	if strings.TrimSpace(groupName) == "" {
+		return nil, errors.ErrGroupNameRequired
+	}
+
+	if strings.TrimSpace(policyName) == "" {
+		return nil, errors.ErrPolicyNameRequired
+	}
+
+	group, err := service.store.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errors.ErrGroupNotFound
+	}
+
+	policy, err := service.policyStore.GetByName(ctx, policyName)
+	if err != nil {
+		return nil, err
+	}
+	if policy == nil {
+		return nil, errors.ErrPolicyNotFound
+	}
+
+	linked, err := service.store.LinkToPolicy(ctx, groupName, policy.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	linked.PolicyName = policy.Name
+
+	return mapGroupToOutputSchema(linked, nil), nil
+}
+
+// UnlinkPolicy removes the association between the group whose name matches
+// the argument and its currently linked policy.
+func (service *GroupService) UnlinkPolicy(ctx context.Context, groupName string) (*schemas.GroupOutputSchema, error) {
+	if strings.TrimSpace(groupName) == "" {
+		return nil, errors.ErrGroupNameRequired
+	}
+
+	group, err := service.store.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errors.ErrGroupNotFound
+	}
+	if group.PolicyID == nil {
+		return nil, errors.ErrGroupNotLinkedToPolicy
+	}
+
+	unlinked, err := service.store.UnlinkFromPolicy(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapGroupToOutputSchema(unlinked, nil), nil
+}
+
 // mapGroupToOutputSchema converts the Group entity format into the output
 // schema provided by this service. Returns nil if the provided group is
 // nil.
@@ -254,6 +323,8 @@ func mapGroupToOutputSchema(group *domain.Group, machineIDs []int64) *schemas.Gr
 		Name:       group.Name,
 		CreatedAt:  group.CreatedAt,
 		MachineIDs: machineIDs,
+		PolicyID:   group.PolicyID,
+		PolicyName: group.PolicyName,
 	}
 }
 

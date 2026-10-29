@@ -57,7 +57,7 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	}
 
 	registerHandlers(router,
-		handler.NewGroupHandler(service.NewGroupService(store.NewGroupStore(db), machineStore, cfg.StalenessGrace, time.Now)),
+		handler.NewGroupHandler(service.NewGroupService(store.NewGroupStore(db), machineStore, policyStore, cfg.StalenessGrace, time.Now)),
 		handler.NewPolicyHandler(service.NewPolicyService(policyStore)),
 		handler.NewRuleHandler(service.NewRuleService(store.NewRuleStore(db), policyStore)),
 		handler.NewMachineHandler(machineService),

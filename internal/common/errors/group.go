@@ -18,4 +18,8 @@ var (
 	// ErrGroupNewNameRequired is returns when the new name of a group in a rename
 	// operation is not provided
 	ErrGroupNewNameRequired = errors.New("must specify new name for group")
+
+	// ErrGroupNotLinkedToPolicy is returned when unlinking a group from a policy
+	// it is not currently associated with.
+	ErrGroupNotLinkedToPolicy = errors.New("group is not linked to any policy")
 )

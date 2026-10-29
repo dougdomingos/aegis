@@ -463,6 +463,114 @@ func TestGroupService_ListAllGroups_WithLinkedMachines_IncludesMachineIDs(t *tes
 }
 
 // ============================================================================
+// LinkPolicy & UnlinkPolicy
+// ============================================================================
+
+func TestGroupService_LinkPolicy_WithValidGroupAndPolicy_LinksPolicy(t *testing.T) {
+	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+
+	res, err := svc.LinkPolicy(ctx, "lab1", "default")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.PolicyID == nil || *res.PolicyID != policy.ID {
+		t.Errorf("expected policy id %d, got %v", policy.ID, res.PolicyID)
+	}
+	if res.PolicyName != "default" {
+		t.Errorf("expected policy name %q, got %q", "default", res.PolicyName)
+	}
+	if group.PolicyID == nil || *group.PolicyID != policy.ID {
+		t.Errorf("expected store group linked, got %v", group.PolicyID)
+	}
+}
+
+func TestGroupService_LinkPolicy_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
+	ctx, _, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	_, _ = policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+
+	_, err := svc.LinkPolicy(ctx, "unknown", "default")
+
+	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrGroupNotFound, err)
+	}
+}
+
+func TestGroupService_LinkPolicy_WithInexistentPolicy_ReturnsErrPolicyNotFound(t *testing.T) {
+	ctx, groupStore, _, svc := arrangeGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+
+	_, err := svc.LinkPolicy(ctx, "lab1", "unknown")
+
+	if !errors.Is(err, groupErrors.ErrPolicyNotFound) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrPolicyNotFound, err)
+	}
+}
+
+func TestGroupService_LinkPolicy_WithExistingPolicy_ReplacesPolicy(t *testing.T) {
+	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	first, _ := policyStore.Create(ctx, "first", domain.WhitelistPolicyType)
+	second, _ := policyStore.Create(ctx, "second", domain.BlacklistPolicyType)
+	_, _ = svc.LinkPolicy(ctx, "lab1", "first")
+
+	res, err := svc.LinkPolicy(ctx, "lab1", "second")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.PolicyID == nil || *res.PolicyID != second.ID {
+		t.Errorf("expected policy id %d, got %v", second.ID, res.PolicyID)
+	}
+	if res.PolicyName != "second" {
+		t.Errorf("expected policy name %q, got %q", "second", res.PolicyName)
+	}
+	_ = first
+}
+
+func TestGroupService_UnlinkPolicy_WithLinkedGroup_ClearsPolicy(t *testing.T) {
+	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	_, _ = policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	_, _ = svc.LinkPolicy(ctx, "lab1", "default")
+
+	res, err := svc.UnlinkPolicy(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.PolicyID != nil {
+		t.Errorf("expected nil policy id, got %v", *res.PolicyID)
+	}
+	if res.PolicyName != "" {
+		t.Errorf("expected empty policy name, got %q", res.PolicyName)
+	}
+}
+
+func TestGroupService_UnlinkPolicy_WithUnlinkedGroup_ReturnsErrGroupNotLinkedToPolicy(t *testing.T) {
+	ctx, groupStore, _, svc := arrangeGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+
+	_, err := svc.UnlinkPolicy(ctx, "lab1")
+
+	if !errors.Is(err, groupErrors.ErrGroupNotLinkedToPolicy) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrGroupNotLinkedToPolicy, err)
+	}
+}
+
+func TestGroupService_UnlinkPolicy_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
+	ctx, _, _, svc := arrangeGroupPolicyServiceTest(t)
+
+	_, err := svc.UnlinkPolicy(ctx, "unknown")
+
+	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrGroupNotFound, err)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -481,8 +589,23 @@ func arrangeGroupMachineServiceTest(t *testing.T) (context.Context, *MockGroupSt
 
 	groupStore := NewMockGroupStore()
 	machineStore := NewMockMachineStore()
+	policyStore := NewMockPolicyStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, time.Minute, now)
 
 	return context.Background(), groupStore, machineStore, *svc
+}
+
+// arrangeGroupPolicyServiceTest initializes a new group service instance with
+// mocked group and policy store providers.
+func arrangeGroupPolicyServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockPolicyStore, service.GroupService) {
+	t.Helper()
+
+	groupStore := NewMockGroupStore()
+	machineStore := NewMockMachineStore()
+	policyStore := NewMockPolicyStore()
+	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, time.Minute, now)
+
+	return context.Background(), groupStore, policyStore, *svc
 }
