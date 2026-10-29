@@ -13,11 +13,18 @@ import (
 const (
 	queryUpsertMachine = `INSERT INTO machines (name, ip, status) VALUES (?, ?, 'DISCONNECTED')
 		ON CONFLICT(ip) DO UPDATE SET name = excluded.name`
-	queryGetMachineByIP    = "SELECT id, name, ip, mac, status, last_seen_at, created_at FROM machines WHERE ip = ?"
-	queryGetMachineByID    = "SELECT id, name, ip, mac, status, last_seen_at, created_at FROM machines WHERE id = ?"
-	queryGetAllMachines    = "SELECT id, name, ip, mac, status, last_seen_at, created_at FROM machines"
-	queryDeleteMachineByIP = "DELETE FROM machines WHERE ip = ?"
-	queryTouchMachine      = "UPDATE machines SET mac = CASE WHEN ? = '' THEN mac ELSE ? END, status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?"
+	queryGetMachineByIP = `SELECT m.id, m.name, m.ip, m.mac, m.status, m.last_seen_at, m.created_at, m.group_id, g.name
+		FROM machines m LEFT JOIN groups g ON g.id = m.group_id WHERE m.ip = ?`
+	queryGetMachineByID = `SELECT m.id, m.name, m.ip, m.mac, m.status, m.last_seen_at, m.created_at, m.group_id, g.name
+		FROM machines m LEFT JOIN groups g ON g.id = m.group_id WHERE m.id = ?`
+	queryGetAllMachines = `SELECT m.id, m.name, m.ip, m.mac, m.status, m.last_seen_at, m.created_at, m.group_id, g.name
+		FROM machines m LEFT JOIN groups g ON g.id = m.group_id`
+	queryListMachinesByGroup = `SELECT m.id, m.name, m.ip, m.mac, m.status, m.last_seen_at, m.created_at, m.group_id, g.name
+		FROM machines m LEFT JOIN groups g ON g.id = m.group_id WHERE m.group_id = ?`
+	queryDeleteMachineByIP      = "DELETE FROM machines WHERE ip = ?"
+	queryLinkMachineToGroup     = "UPDATE machines SET group_id = ? WHERE id = ?"
+	queryUnlinkMachineFromGroup = "UPDATE machines SET group_id = NULL WHERE id = ?"
+	queryTouchMachine           = "UPDATE machines SET mac = CASE WHEN ? = '' THEN mac ELSE ? END, status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?"
 )
 
 // MachineStore manages all database-related operations over machines.
@@ -35,6 +42,50 @@ func NewMachineStore(db *sql.DB) *MachineStore {
 // GetByIP retrieves the machine whose IP matches the provided argument.
 func (store *MachineStore) GetByIP(ctx context.Context, ip string) (*domain.Machine, error) {
 	return store.executor.QueryOne(ctx, queryGetMachineByIP, ip)
+}
+
+func (store *MachineStore) GetByID(ctx context.Context, id int64) (*domain.Machine, error) {
+	return store.executor.QueryOne(ctx, queryGetMachineByID, id)
+}
+
+func (store *MachineStore) LinkToGroup(ctx context.Context, machineID int64, groupID int64) (*domain.Machine, error) {
+	result, err := store.executor.Exec(ctx, queryLinkMachineToGroup, groupID, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to link machine %d to group %d: %w", machineID, groupID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("%w: id %d", errors.ErrMachineNotFound, machineID)
+	}
+
+	return store.GetByID(ctx, machineID)
+}
+
+func (store *MachineStore) UnlinkFromGroup(ctx context.Context, machineID int64) (*domain.Machine, error) {
+	result, err := store.executor.Exec(ctx, queryUnlinkMachineFromGroup, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlink machine %d: %w", machineID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("%w: id %d", errors.ErrMachineNotFound, machineID)
+	}
+
+	return store.GetByID(ctx, machineID)
+}
+
+func (store *MachineStore) ListByGroup(ctx context.Context, groupID int64) ([]domain.Machine, error) {
+	return store.executor.QueryMany(ctx, queryListMachinesByGroup, groupID)
 }
 
 // List retrieves all registered machines within the database.
@@ -143,9 +194,19 @@ func listMachines(ctx context.Context, tx *sql.Tx) ([]domain.Machine, error) {
 // mapRowToMachine maps a scan function to a domain.Machine struct.
 func mapRowToMachine(scan query.ScanFunc) (domain.Machine, error) {
 	var machine domain.Machine
-	if err := scan(&machine.ID, &machine.Name, &machine.IP, &machine.MAC, &machine.Status, &machine.LastSeenAt, &machine.CreatedAt); err != nil {
+	var groupID sql.NullInt64
+	var groupName sql.NullString
+
+	if err := scan(&machine.ID, &machine.Name, &machine.IP, &machine.MAC, &machine.Status, &machine.LastSeenAt, &machine.CreatedAt, &groupID, &groupName); err != nil {
 		return domain.Machine{}, err
 	}
+
+	if groupID.Valid {
+		id := groupID.Int64
+		machine.GroupID = &id
+	}
+
+	machine.GroupName = groupName.String
 
 	return machine, nil
 }

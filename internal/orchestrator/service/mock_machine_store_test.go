@@ -136,3 +136,76 @@ func (mock *MockMachineStore) Touch(ctx context.Context, id int64, mac string, s
 
 	return nil, fmt.Errorf("%w: id %d", machineErrors.ErrMachineNotFound, id)
 }
+
+// GetByID retrieves a machine by its unique ID or returns StoreErr if set.
+func (mock *MockMachineStore) GetByID(ctx context.Context, id int64) (*domain.Machine, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	for _, machine := range mock.machines {
+		if machine.ID == id {
+			return machine, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// LinkToGroup associates a machine with a group or returns StoreErr if set.
+func (mock *MockMachineStore) LinkToGroup(ctx context.Context, machineID int64, groupID int64) (*domain.Machine, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	machine, err := mock.GetByID(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+
+	if machine == nil {
+		return nil, fmt.Errorf("%w: id %d", machineErrors.ErrMachineNotFound, machineID)
+	}
+
+	id := groupID
+	machine.GroupID = &id
+
+	return machine, nil
+}
+
+// UnlinkFromGroup clears a machine's group association or returns StoreErr if set.
+func (mock *MockMachineStore) UnlinkFromGroup(ctx context.Context, machineID int64) (*domain.Machine, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	machine, err := mock.GetByID(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+
+	if machine == nil {
+		return nil, fmt.Errorf("%w: id %d", machineErrors.ErrMachineNotFound, machineID)
+	}
+
+	machine.GroupID = nil
+	machine.GroupName = ""
+
+	return machine, nil
+}
+
+// ListByGroup returns the machines linked to the provided group.
+func (mock *MockMachineStore) ListByGroup(ctx context.Context, groupID int64) ([]domain.Machine, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	list := make([]domain.Machine, 0)
+	for _, machine := range mock.machines {
+		if machine.GroupID != nil && *machine.GroupID == groupID {
+			list = append(list, *machine)
+		}
+	}
+
+	return list, nil
+}
