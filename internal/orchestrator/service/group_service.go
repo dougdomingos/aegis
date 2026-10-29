@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/common/schemas"
@@ -16,12 +17,28 @@ type GroupService struct {
 
 	// store provides database operations related to groups
 	store domain.GroupStore
+
+	// machineStore provides database operations related to machines, used to
+	// link and unlink machines to groups.
+	machineStore domain.MachineStore
+
+	// stalenessGrace is the duration a machine remains displayed as CONNECTED
+	// after its last heartbeat.
+	stalenessGrace time.Duration
+
+	// now is the clock used to resolve the current time.
+	now func() time.Time
 }
 
 // NewGroupService creates a new service instance with the provided store
 // manager.
-func NewGroupService(store domain.GroupStore) *GroupService {
-	return &GroupService{store: store}
+func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
+	return &GroupService{
+		store:          store,
+		machineStore:   machineStore,
+		stalenessGrace: stalenessGrace,
+		now:            now,
+	}
 }
 
 // CreateGroup registers a new logical group into the system. The name provided to
@@ -45,7 +62,7 @@ func (service *GroupService) CreateGroup(ctx context.Context, payload schemas.Cr
 		return nil, fmt.Errorf("Failed to register new group: %w", err)
 	}
 
-	return mapGroupToOutputSchema(newGroup), nil
+	return mapGroupToOutputSchema(newGroup, nil), nil
 }
 
 // GetGroupByName retrieves a group by its name. If no group matches the
@@ -60,7 +77,16 @@ func (service *GroupService) GetGroupByName(ctx context.Context, payload schemas
 		return nil, err
 	}
 
-	return mapGroupToOutputSchema(existentGroup), nil
+	if existentGroup == nil {
+		return nil, nil
+	}
+
+	ids, err := service.machineIDs(ctx, existentGroup.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapGroupToOutputSchema(existentGroup, ids), nil
 }
 
 // ListAllGroups returns all the existent groups within the database.
@@ -72,7 +98,12 @@ func (service *GroupService) ListAllGroups(ctx context.Context) ([]schemas.Group
 
 	output := make([]schemas.GroupOutputSchema, len(groups))
 	for i, g := range groups {
-		output[i] = *mapGroupToOutputSchema(&g)
+		ids, err := service.machineIDs(ctx, g.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		output[i] = *mapGroupToOutputSchema(&g, ids)
 	}
 
 	return output, nil
@@ -110,7 +141,12 @@ func (service *GroupService) ChangeGroupName(ctx context.Context, payload schema
 		return nil, err
 	}
 
-	return mapGroupToOutputSchema(group), nil
+	ids, err := service.machineIDs(ctx, group.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapGroupToOutputSchema(group, ids), nil
 }
 
 // RemoveGroup deletes a group from the database by its name. If no group
@@ -136,17 +172,102 @@ func (service *GroupService) RemoveGroup(ctx context.Context, payload schemas.Re
 	return nil
 }
 
+// LinkMachine associates the machine whose ID matches the argument with the
+// group whose name matches the argument, moving it from any previous group.
+func (service *GroupService) LinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+	if strings.TrimSpace(groupName) == "" {
+		return nil, errors.ErrGroupNameRequired
+	}
+
+	group, err := service.store.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errors.ErrGroupNotFound
+	}
+
+	machine, err := service.machineStore.GetByID(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+	if machine == nil {
+		return nil, errors.ErrMachineNotFound
+	}
+
+	linked, err := service.machineStore.LinkToGroup(ctx, machineID, group.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapMachineToOutputSchema(linked, service.now(), service.stalenessGrace), nil
+}
+
+// UnlinkMachine removes the association between the machine whose ID matches
+// the argument and the group whose name matches the argument.
+func (service *GroupService) UnlinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error) {
+	if strings.TrimSpace(groupName) == "" {
+		return nil, errors.ErrGroupNameRequired
+	}
+
+	group, err := service.store.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errors.ErrGroupNotFound
+	}
+
+	machine, err := service.machineStore.GetByID(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+	if machine == nil {
+		return nil, errors.ErrMachineNotFound
+	}
+	if machine.GroupID == nil || *machine.GroupID != group.ID {
+		return nil, errors.ErrMachineNotInGroup
+	}
+
+	unlinked, err := service.machineStore.UnlinkFromGroup(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapMachineToOutputSchema(unlinked, service.now(), service.stalenessGrace), nil
+}
+
 // mapGroupToOutputSchema converts the Group entity format into the output
 // schema provided by this service. Returns nil if the provided group is
 // nil.
-func mapGroupToOutputSchema(group *domain.Group) *schemas.GroupOutputSchema {
+func mapGroupToOutputSchema(group *domain.Group, machineIDs []int64) *schemas.GroupOutputSchema {
 	if group == nil {
 		return nil
 	}
 
-	return &schemas.GroupOutputSchema{
-		ID:        group.ID,
-		Name:      group.Name,
-		CreatedAt: group.CreatedAt,
+	if machineIDs == nil {
+		machineIDs = []int64{}
 	}
+
+	return &schemas.GroupOutputSchema{
+		ID:         group.ID,
+		Name:       group.Name,
+		CreatedAt:  group.CreatedAt,
+		MachineIDs: machineIDs,
+	}
+}
+
+// machineIDs lists the IDs of the machines linked to the provided group.
+func (service *GroupService) machineIDs(ctx context.Context, groupID int64) ([]int64, error) {
+	machines, err := service.machineStore.ListByGroup(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]int64, 0, len(machines))
+	for _, machine := range machines {
+		ids = append(ids, machine.ID)
+	}
+
+	return ids, nil
 }

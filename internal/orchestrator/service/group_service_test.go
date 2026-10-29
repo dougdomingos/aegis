@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"dougdomingos.com/aegis/internal/orchestrator/domain"
 
 	groupErrors "dougdomingos.com/aegis/internal/common/errors"
+	machineErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/common/schemas"
 	"dougdomingos.com/aegis/internal/orchestrator/service"
 )
@@ -339,6 +343,126 @@ func TestGroupService_RemoveGroup_WhenStoreFails_RejectsRemoval(t *testing.T) {
 }
 
 // ============================================================================
+// LinkMachine & UnlinkMachine
+// ============================================================================
+
+func TestGroupService_LinkMachine_WithValidGroupAndMachine_LinksMachine(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	res, err := svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.GroupID == nil || *res.GroupID != group.ID {
+		t.Errorf("expected group id %d, got %v", group.ID, res.GroupID)
+	}
+}
+
+func TestGroupService_LinkMachine_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
+	ctx, _, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	_, err := svc.LinkMachine(ctx, "unknown", machine.ID)
+
+	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrGroupNotFound, err)
+	}
+}
+
+func TestGroupService_LinkMachine_WithInexistentMachine_ReturnsErrMachineNotFound(t *testing.T) {
+	ctx, groupStore, _, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+
+	_, err := svc.LinkMachine(ctx, "lab1", 999)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected %v, got %v", machineErrors.ErrMachineNotFound, err)
+	}
+}
+
+func TestGroupService_LinkMachine_WithMachineInAnotherGroup_MovesMachine(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	second, _ := groupStore.Create(ctx, "lab2")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	res, err := svc.LinkMachine(ctx, "lab2", machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.GroupID == nil || *res.GroupID != second.ID {
+		t.Errorf("expected group id %d, got %v", second.ID, res.GroupID)
+	}
+}
+
+func TestGroupService_UnlinkMachine_WithLinkedMachine_ClearsGroup(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	res, err := svc.UnlinkMachine(ctx, "lab1", machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res.GroupID != nil {
+		t.Errorf("expected nil group id, got %v", *res.GroupID)
+	}
+}
+
+func TestGroupService_UnlinkMachine_WhenLinkedToAnotherGroup_ReturnsErrMachineNotInGroup(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	_, _ = groupStore.Create(ctx, "lab2")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab2", machine.ID)
+
+	_, err := svc.UnlinkMachine(ctx, "lab1", machine.ID)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotInGroup) {
+		t.Errorf("expected %v, got %v", machineErrors.ErrMachineNotInGroup, err)
+	}
+}
+
+func TestGroupService_GetGroupByName_WithLinkedMachine_IncludesMachineIDs(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	res, err := svc.GetGroupByName(ctx, schemas.GetGroupByNameSchema{Name: "lab1"})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(res.MachineIDs) != 1 || res.MachineIDs[0] != machine.ID {
+		t.Errorf("expected machine ids [%d], got %v", machine.ID, res.MachineIDs)
+	}
+}
+
+func TestGroupService_ListAllGroups_WithLinkedMachines_IncludesMachineIDs(t *testing.T) {
+	ctx, groupStore, machineStore, svc := arrangeGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	res, err := svc.ListAllGroups(ctx)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(res) != 1 || len(res[0].MachineIDs) != 1 || res[0].MachineIDs[0] != machine.ID {
+		t.Errorf("expected one group linked to machine %d, got %+v", machine.ID, res)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -346,9 +470,19 @@ func TestGroupService_RemoveGroup_WhenStoreFails_RejectsRemoval(t *testing.T) {
 func arrangeGroupServiceTest(t *testing.T) (context.Context, *MockGroupStore, service.GroupService) {
 	t.Helper()
 
-	mockStore := NewMockGroupStore()
-	ctx := context.Background()
-	service := service.NewGroupService(mockStore)
+	ctx, groupStore, _, svc := arrangeGroupMachineServiceTest(t)
+	return ctx, groupStore, svc
+}
 
-	return ctx, mockStore, *service
+// arrangeGroupMachineServiceTest initializes a new group service instance with
+// mocked group and machine store providers.
+func arrangeGroupMachineServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockMachineStore, service.GroupService) {
+	t.Helper()
+
+	groupStore := NewMockGroupStore()
+	machineStore := NewMockMachineStore()
+	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+	svc := service.NewGroupService(groupStore, machineStore, time.Minute, now)
+
+	return context.Background(), groupStore, machineStore, *svc
 }

@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -261,4 +262,118 @@ func TestMachineStore_Touch_WithUnknownID_ReturnsMachineNotFoundError(t *testing
 	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
 		t.Errorf("expected ErrMachineNotFound, got: %v", err)
 	}
+}
+
+// ============================================================================
+// LinkToGroup, UnlinkFromGroup, GetByID & ListByGroup
+// ============================================================================
+
+func TestMachineStore_LinkToGroup_WithValidIDs_SetsGroupAndName(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	linked, err := machineStore.LinkToGroup(ctx, machine.ID, group.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if linked.GroupID == nil || *linked.GroupID != group.ID {
+		t.Errorf("expected group id %d, got %v", group.ID, linked.GroupID)
+	}
+	if linked.GroupName != "lab1" {
+		t.Errorf("expected group name %q, got %q", "lab1", linked.GroupName)
+	}
+}
+
+func TestMachineStore_LinkToGroup_WithInexistentMachine_ReturnsErrMachineNotFound(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+
+	_, err := machineStore.LinkToGroup(ctx, 999, group.ID)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected %v, got %v", machineErrors.ErrMachineNotFound, err)
+	}
+}
+
+func TestMachineStore_UnlinkFromGroup_WithLinkedMachine_ClearsGroupID(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = machineStore.LinkToGroup(ctx, machine.ID, group.ID)
+
+	unlinked, err := machineStore.UnlinkFromGroup(ctx, machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if unlinked.GroupID != nil {
+		t.Errorf("expected nil group id, got %v", *unlinked.GroupID)
+	}
+}
+
+func TestMachineStore_GetByID_WithUnlinkedMachine_ReturnsNilGroup(t *testing.T) {
+	ctx, machineStore, _ := arrangeMachineGroupStoreTest(t)
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	found, err := machineStore.GetByID(ctx, machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if found.GroupID != nil {
+		t.Errorf("expected nil group id, got %v", *found.GroupID)
+	}
+}
+
+func TestMachineStore_ListByGroup_WithMixedMachines_ReturnsOnlyGroupMembers(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	linked, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.12", Name: "lcc1-012"})
+	_, _ = machineStore.LinkToGroup(ctx, linked.ID, group.ID)
+
+	machines, err := machineStore.ListByGroup(ctx, group.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(machines) != 1 || machines[0].ID != linked.ID {
+		t.Errorf("expected only machine %d, got %+v", linked.ID, machines)
+	}
+}
+
+func TestGroupStore_Remove_WithLinkedMachines_KeepsMachinesUnlinked(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = machineStore.LinkToGroup(ctx, machine.ID, group.ID)
+
+	if err := groupStore.Remove(ctx, "lab1"); err != nil {
+		t.Fatalf("expected group to be removed, got: %v", err)
+	}
+
+	found, err := machineStore.GetByID(ctx, machine.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if found == nil {
+		t.Fatal("expected machine to remain registered, got nil")
+	}
+	if found.GroupID != nil {
+		t.Errorf("expected nil group id after group removal, got %v", *found.GroupID)
+	}
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+// arrangeMachineGroupStoreTest builds both stores over a migrated database.
+func arrangeMachineGroupStoreTest(t *testing.T) (context.Context, *store.MachineStore, *store.GroupStore) {
+	t.Helper()
+
+	ctx, db := arrangeStoreDB(t)
+	return ctx, store.NewMachineStore(db), store.NewGroupStore(db)
 }

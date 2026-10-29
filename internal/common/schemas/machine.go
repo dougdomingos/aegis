@@ -29,6 +29,8 @@ type MachineOutputSchema struct {
 	Name       string
 	IP         string
 	MAC        string
+	GroupID    *int64
+	GroupName  string
 	Status     string
 	LastSeenAt *time.Time
 	CreatedAt  time.Time

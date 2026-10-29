@@ -19,4 +19,8 @@ var (
 	// ErrMachineNotFound is returned when an operation targets a machine that
 	// is no longer registered in the system.
 	ErrMachineNotFound = errors.New("machine not found")
+
+	// ErrMachineNotInGroup is returned when unlinking a machine from a group it is
+	// not currently associated with.
+	ErrMachineNotInGroup = errors.New("machine is not linked to the requested group")
 )

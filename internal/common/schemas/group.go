@@ -29,7 +29,14 @@ type ChangeGroupNameSchema struct {
 
 // GroupOutputSchema declares the groups fields displayed to clients.
 type GroupOutputSchema struct {
-	ID        int64
-	Name      string
-	CreatedAt time.Time
+	ID         int64
+	Name       string
+	CreatedAt  time.Time
+	MachineIDs []int64
+}
+
+// LinkMachineToGroupSchema declares the machine selected to be linked to the
+// group named in the request path.
+type LinkMachineToGroupSchema struct {
+	MachineID int64 `json:"machine_id"`
 }

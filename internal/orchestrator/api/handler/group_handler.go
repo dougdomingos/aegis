@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/common/schemas"
@@ -18,6 +19,8 @@ type GroupServiceInterface interface {
 	ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error)
 	ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
 	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
+	LinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
+	UnlinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
 }
 
 // GroupHandler implements the methods that map HTTP requests into operations
@@ -38,6 +41,8 @@ func (handler *GroupHandler) RegisterRoutes(r chi.Router) {
 		r.Get("/", handler.List)
 		r.Get("/{name}", handler.GetByName)
 		r.Patch("/rename", handler.Rename)
+		r.Post("/{name}/machines", handler.LinkMachine)
+		r.Delete("/{name}/machines/{machineID}", handler.UnlinkMachine)
 		r.Delete("/{name}", handler.Delete)
 	})
 }
@@ -130,4 +135,67 @@ func (handler *GroupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// LinkMachine associates the machine named in the request body with the group
+// named in the request path.
+func (handler *GroupHandler) LinkMachine(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	var payload schemas.LinkMachineToGroupSchema
+	if !utils.DecodePayload(w, r, &payload) {
+		return
+	}
+
+	res, err := handler.service.LinkMachine(r.Context(), name, payload.MachineID)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrGroupNameRequired: http.StatusBadRequest,
+			errors.ErrGroupNotFound:     http.StatusNotFound,
+			errors.ErrMachineNotFound:   http.StatusNotFound,
+		})
+
+		return
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+// UnlinkMachine removes the association between the machine named in the
+// request path and the group named in the request path.
+func (handler *GroupHandler) UnlinkMachine(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	machineID, ok := parseMachineID(w, r, "machineID")
+	if !ok {
+		return
+	}
+
+	res, err := handler.service.UnlinkMachine(r.Context(), name, machineID)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrGroupNameRequired: http.StatusBadRequest,
+			errors.ErrGroupNotFound:     http.StatusNotFound,
+			errors.ErrMachineNotFound:   http.StatusNotFound,
+			errors.ErrMachineNotInGroup: http.StatusNotFound,
+		})
+
+		return
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+// parseMachineID decodes the named URL parameter into an integer. If the
+// parameter is not a valid number, it writes an HTTP 400 Bad Request and
+// returns false.
+func parseMachineID(w http.ResponseWriter, r *http.Request, paramName string) (int64, bool) {
+	rawID := chi.URLParam(r, paramName)
+
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		utils.EmitError(w, "invalid machine id", http.StatusBadRequest)
+		return 0, false
+	}
+
+	return id, true
 }

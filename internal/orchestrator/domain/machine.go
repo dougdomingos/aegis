@@ -45,6 +45,14 @@ type Machine struct {
 
 	// CreatedAt is the timestamp assigned at the registration of the machine.
 	CreatedAt time.Time
+
+	// GroupID is the identifier of the group the machine is linked to, or nil
+	// when the machine is not linked to any group.
+	GroupID *int64
+
+	// GroupName is the human-friendly label of the linked group, populated on
+	// reads. It is empty when the machine is not linked.
+	GroupName string
 }
 
 // MachineStore declares the required operations that any storage service must
@@ -53,6 +61,19 @@ type MachineStore interface {
 
 	// GetByIP retrieves the machine whose IP matches the provided argument.
 	GetByIP(ctx context.Context, ip string) (*Machine, error)
+
+	// GetByID retrieves the machine whose ID matches the provided argument.
+	GetByID(ctx context.Context, id int64) (*Machine, error)
+
+	// LinkToGroup associates the machine with the provided group, moving it
+	// from any previously linked group.
+	LinkToGroup(ctx context.Context, machineID int64, groupID int64) (*Machine, error)
+
+	// UnlinkFromGroup clears the group association of the machine.
+	UnlinkFromGroup(ctx context.Context, machineID int64) (*Machine, error)
+
+	// ListByGroup retrieves all machines linked to the provided group.
+	ListByGroup(ctx context.Context, groupID int64) ([]Machine, error)
 
 	// List retrieves all registered machines within the database.
 	List(ctx context.Context) ([]Machine, error)
