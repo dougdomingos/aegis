@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"time"
 
-	sentinelErrors "dougdomingos.com/aegis/internal/errors"
+	sentinelErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/internal/sentinel/logging"

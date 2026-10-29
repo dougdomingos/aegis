@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"dougdomingos.com/aegis/internal/auth"
+	"dougdomingos.com/aegis/internal/common/auth"
 	"dougdomingos.com/aegis/internal/sentinel/logging"
 )
 

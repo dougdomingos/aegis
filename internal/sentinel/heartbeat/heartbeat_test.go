@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	sentinelErrors "dougdomingos.com/aegis/internal/errors"
+	sentinelErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
 	"dougdomingos.com/aegis/internal/sentinel/heartbeat"
 	"dougdomingos.com/aegis/internal/sentinel/identity"

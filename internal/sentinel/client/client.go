@@ -13,9 +13,9 @@ import (
 	"net/url"
 	"time"
 
-	"dougdomingos.com/aegis/internal/auth"
-	"dougdomingos.com/aegis/internal/errors"
-	"dougdomingos.com/aegis/internal/schemas"
+	"dougdomingos.com/aegis/internal/common/auth"
+	"dougdomingos.com/aegis/internal/common/errors"
+	"dougdomingos.com/aegis/internal/common/schemas"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 )

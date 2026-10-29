@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"dougdomingos.com/aegis/internal/schemas"
+	"dougdomingos.com/aegis/internal/common/schemas"
 	mobynetwork "github.com/moby/moby/api/types/network"
 	"github.com/testcontainers/testcontainers-go"
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"

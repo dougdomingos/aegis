@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"dougdomingos.com/aegis/internal/auth"
+	"dougdomingos.com/aegis/internal/common/auth"
 )
 
 func TestHeartbeatE2E_RunningSentinel_KeepsLastSeenAtFresh(t *testing.T) {

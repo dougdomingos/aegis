@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"dougdomingos.com/aegis/internal/api"
-	"dougdomingos.com/aegis/internal/config"
-	"dougdomingos.com/aegis/internal/infra"
+	"dougdomingos.com/aegis/internal/orchestrator/api"
+	"dougdomingos.com/aegis/internal/orchestrator/config"
+	"dougdomingos.com/aegis/internal/orchestrator/infra"
 )
 
 const (

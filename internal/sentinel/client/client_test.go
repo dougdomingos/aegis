@@ -14,11 +14,11 @@ import (
 
 	"errors"
 
-	sentinelErrors "dougdomingos.com/aegis/internal/errors"
+	sentinelErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/sentinel/client"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 
-	"dougdomingos.com/aegis/internal/auth"
+	"dougdomingos.com/aegis/internal/common/auth"
 )
 
 // labKey is the 32-byte shared key used by the client tests.
