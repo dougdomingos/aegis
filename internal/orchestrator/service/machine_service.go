@@ -184,6 +184,8 @@ func mapMachineToOutputSchema(machine *domain.Machine, now time.Time, grace time
 		Name:       machine.Name,
 		IP:         machine.IP,
 		MAC:        machine.MAC,
+		GroupID:    machine.GroupID,
+		GroupName:  machine.GroupName,
 		Status:     string(status),
 		LastSeenAt: machine.LastSeenAt,
 		CreatedAt:  machine.CreatedAt,
