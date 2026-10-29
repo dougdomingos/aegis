@@ -17,6 +17,14 @@ type Group struct {
 
 	// CreatedAt is the timestamp assigned at the registration of a group.
 	CreatedAt time.Time
+
+	// PolicyID is the identifier of the policy linked to the group, or nil
+	// when the group is not linked to any policy.
+	PolicyID *int64
+
+	// PolicyName is the human-friendly label of the linked policy, populated
+	// on reads. It is empty when the group is not linked.
+	PolicyName string
 }
 
 // GroupStore declares the required operations that any storage service must
@@ -43,4 +51,11 @@ type GroupStore interface {
 
 	// Remove removes the group whose name matches the provided argument.
 	Remove(ctx context.Context, name string) error
+
+	// LinkToPolicy associates the group with the provided policy, replacing any
+	// previously linked policy.
+	LinkToPolicy(ctx context.Context, groupName string, policyID int64) (*Group, error)
+
+	// UnlinkFromPolicy clears the policy association of the group.
+	UnlinkFromPolicy(ctx context.Context, groupName string) (*Group, error)
 }

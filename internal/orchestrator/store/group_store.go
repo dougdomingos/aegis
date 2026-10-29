@@ -10,12 +10,14 @@ import (
 )
 
 const (
-	queryCreateGroup       = "INSERT INTO groups (name) VALUES (?)"
-	queryGetGroupByID      = "SELECT id, name, created_at FROM groups WHERE id = ?"
-	queryGetGroupByName    = "SELECT id, name, created_at FROM groups WHERE name = ?"
-	queryGetAllGroups      = "SELECT id, name, created_at FROM groups"
-	queryUpdateGroup       = "UPDATE groups SET name = ? WHERE id = ?"
-	queryDeleteGroupByName = "DELETE FROM groups WHERE name = ?"
+	queryCreateGroup           = "INSERT INTO groups (name) VALUES (?)"
+	queryGetGroupByID          = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id WHERE g.id = ?"
+	queryGetGroupByName        = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id WHERE g.name = ?"
+	queryGetAllGroups          = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id"
+	queryUpdateGroup           = "UPDATE groups SET name = ? WHERE id = ?"
+	queryDeleteGroupByName     = "DELETE FROM groups WHERE name = ?"
+	queryLinkGroupToPolicy     = "UPDATE groups SET policy_id = ? WHERE name = ?"
+	queryUnlinkGroupFromPolicy = "UPDATE groups SET policy_id = NULL WHERE name = ?"
 )
 
 // GroupStore manages all database-related operations over groups.
@@ -118,12 +120,57 @@ func (store *GroupStore) Remove(ctx context.Context, name string) error {
 	return nil
 }
 
+func (store *GroupStore) LinkToPolicy(ctx context.Context, groupName string, policyID int64) (*domain.Group, error) {
+	result, err := store.executor.Exec(ctx, queryLinkGroupToPolicy, policyID, groupName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to link group %q to policy %d: %w", groupName, policyID, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("group %q not found", groupName)
+	}
+
+	return store.GetByName(ctx, groupName)
+}
+
+func (store *GroupStore) UnlinkFromPolicy(ctx context.Context, groupName string) (*domain.Group, error) {
+	result, err := store.executor.Exec(ctx, queryUnlinkGroupFromPolicy, groupName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlink group %q from policy: %w", groupName, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return nil, fmt.Errorf("group %q not found", groupName)
+	}
+
+	return store.GetByName(ctx, groupName)
+}
+
 // mapRowToGroup maps a scan function to a domain.Group struct.
 func mapRowToGroup(scan query.ScanFunc) (domain.Group, error) {
 	var group domain.Group
-	if err := scan(&group.ID, &group.Name, &group.CreatedAt); err != nil {
+	var policyID sql.NullInt64
+	var policyName sql.NullString
+
+	if err := scan(&group.ID, &group.Name, &group.CreatedAt, &policyID, &policyName); err != nil {
 		return domain.Group{}, err
 	}
+
+	if policyID.Valid {
+		id := policyID.Int64
+		group.PolicyID = &id
+	}
+	group.PolicyName = policyName.String
 
 	return group, nil
 }

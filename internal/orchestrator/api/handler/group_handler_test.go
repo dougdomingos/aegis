@@ -314,6 +314,98 @@ func TestGroupHandler_UnlinkMachine_WithInvalidMachineID_ReturnsStatus400(t *tes
 }
 
 // ============================================================================
+// LinkPolicy (POST /groups/{name}/policy)
+// ============================================================================
+
+func TestGroupHandler_LinkPolicy_WithValidPayload_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		linkPolicyFn: func(_ context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error) {
+			return &schemas.GroupOutputSchema{Name: groupName, PolicyName: policyName}, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/policy", schemas.LinkPolicyToGroupSchema{PolicyName: "default"})
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_LinkPolicy_WithInexistentGroup_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		linkPolicyFn: func(_ context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/unknown/policy", schemas.LinkPolicyToGroupSchema{PolicyName: "default"})
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_LinkPolicy_WithInexistentPolicy_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		linkPolicyFn: func(_ context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrPolicyNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/policy", schemas.LinkPolicyToGroupSchema{PolicyName: "unknown"})
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_LinkPolicy_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
+	mock := &mockGroupService{}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/policy", "invalid json")
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestGroupHandler_LinkPolicy_WithEmptyPolicyName_ReturnsStatus400(t *testing.T) {
+	mock := &mockGroupService{
+		linkPolicyFn: func(_ context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrPolicyNameRequired
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/policy", schemas.LinkPolicyToGroupSchema{})
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+// ============================================================================
+// UnlinkPolicy (DELETE /groups/{name}/policy)
+// ============================================================================
+
+func TestGroupHandler_UnlinkPolicy_WithLinkedGroup_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		unlinkPolicyFn: func(_ context.Context, groupName string) (*schemas.GroupOutputSchema, error) {
+			return &schemas.GroupOutputSchema{Name: groupName}, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/lab1/policy", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_UnlinkPolicy_WithUnlinkedGroup_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		unlinkPolicyFn: func(_ context.Context, groupName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNotLinkedToPolicy
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/lab1/policy", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_UnlinkPolicy_WithInexistentGroup_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		unlinkPolicyFn: func(_ context.Context, groupName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodDelete, "/groups/unknown/policy", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

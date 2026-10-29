@@ -33,6 +33,19 @@ type GroupOutputSchema struct {
 	Name       string
 	CreatedAt  time.Time
 	MachineIDs []int64
+
+	// PolicyID is the identifier of the linked policy, or nil when no policy is
+	// linked.
+	PolicyID *int64
+
+	// PolicyName is the name of the linked policy; empty when none is linked.
+	PolicyName string
+}
+
+// LinkPolicyToGroupSchema declares the policy selected to be linked to the
+// group named in the request path.
+type LinkPolicyToGroupSchema struct {
+	PolicyName string `json:"policy_name"`
 }
 
 // LinkMachineToGroupSchema declares the machine selected to be linked to the
