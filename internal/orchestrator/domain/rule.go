@@ -2,12 +2,10 @@ package domain
 
 import (
 	"context"
-	"net"
-	"regexp"
-	"strings"
 	"time"
 
 	"dougdomingos.com/aegis/internal/common/errors"
+	"dougdomingos.com/aegis/internal/common/rules"
 )
 
 // RuleType represents the rule classification type.
@@ -20,9 +18,6 @@ const (
 	// IPRuleType identifies IP address or CIDR-based filtering rules.
 	IPRuleType RuleType = "IP"
 )
-
-// domainRegex
-var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 
 // Rule represents a network rule to be enforced by the system.
 type Rule struct {
@@ -99,37 +94,12 @@ func (r *Rule) Validate() error {
 		return errors.ErrRulePolicyRequired
 	}
 
-	if strings.TrimSpace(string(r.Type)) == "" {
-		return errors.ErrRuleTypeRequired
-	}
-
-	if strings.TrimSpace(r.Value) == "" {
-		return errors.ErrRuleValueRequired
-	}
-
-	switch r.Type {
-	case DomainRuleType:
-		if r.Protocol != nil || r.Port != nil {
-			return errors.ErrInvalidFieldForRuleType
-		}
-
-		if !domainRegex.MatchString(r.Value) {
-			return errors.ErrMalformedRuleValue
-		}
-
-	case IPRuleType:
-		if net.ParseIP(r.Value) == nil {
-			return errors.ErrMalformedRuleValue
-		}
-
-		if r.Port != nil {
-			if *r.Port < 0 || *r.Port > 65535 {
-				return errors.ErrInvalidRulePortValue
-			}
-		}
-	}
-
-	return nil
+	return rules.Validate(rules.Rule{
+		Type:     string(r.Type),
+		Value:    r.Value,
+		Protocol: r.Protocol,
+		Port:     r.Port,
+	})
 }
 
 // RuleStore declares the required operations that any storage service must

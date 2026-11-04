@@ -32,4 +32,8 @@ var (
 	// a port field with an invalid configuration (e.g., negative ports,
 	// out-of-range values).
 	ErrInvalidRulePortValue = errors.New("rule port must be a number between 0 and 65536")
+
+	// ErrInvalidRuleType is returned when a rule declares a type that is not
+	// supported by the system (DOMAIN or IP).
+	ErrInvalidRuleType = errors.New("rule type must be DOMAIN or IP")
 )
