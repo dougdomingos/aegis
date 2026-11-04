@@ -52,16 +52,17 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	policyStore := store.NewPolicyStore(db)
 	groupStore := store.NewGroupStore(db)
 	ruleStore := store.NewRuleStore(db)
+	propagationStore := store.NewPropagationStore(db)
 
-	machineService := service.NewMachineService(machineStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
+	machineService := service.NewMachineService(machineStore, propagationStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
 	if err := seedMachines(machineService, cfg); err != nil {
 		return nil, err
 	}
 
 	registerHandlers(router,
-		handler.NewGroupHandler(service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, cfg.StalenessGrace, time.Now)),
-		handler.NewPolicyHandler(service.NewPolicyService(policyStore)),
-		handler.NewRuleHandler(service.NewRuleService(ruleStore, policyStore, groupStore)),
+		handler.NewGroupHandler(service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, cfg.StalenessGrace, time.Now)),
+		handler.NewPolicyHandler(service.NewPolicyService(policyStore, nil)),
+		handler.NewRuleHandler(service.NewRuleService(ruleStore, policyStore, groupStore, nil)),
 		handler.NewMachineHandler(machineService),
 	)
 

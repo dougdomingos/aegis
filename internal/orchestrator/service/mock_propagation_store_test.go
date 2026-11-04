@@ -13,14 +13,17 @@ import (
 // observable from tests running concurrently with it.
 //
 // Injectable error fields abort the respective call: EpochErr for Epoch,
-// CreateErr for Create, and MarkSentErr for MarkSent.
+// CreateErr for Create, MarkSentErr for MarkSent, LatestByMachineErr for
+// LatestByMachine, and ListLatestErr for ListLatest.
 type MockPropagationStore struct {
 	mu sync.Mutex
 
-	EpochValue  string
-	EpochErr    error
-	CreateErr   error
-	MarkSentErr error
+	EpochValue         string
+	EpochErr           error
+	CreateErr          error
+	MarkSentErr        error
+	LatestByMachineErr error
+	ListLatestErr      error
 
 	Rows        map[int64][]domain.Propagation
 	CreateCalls int
@@ -122,6 +125,10 @@ func (mock *MockPropagationStore) LatestByMachine(ctx context.Context, machineID
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
+	if mock.LatestByMachineErr != nil {
+		return nil, mock.LatestByMachineErr
+	}
+
 	rows := mock.Rows[machineID]
 	if len(rows) == 0 {
 		return nil, nil
@@ -135,6 +142,10 @@ func (mock *MockPropagationStore) LatestByMachine(ctx context.Context, machineID
 func (mock *MockPropagationStore) ListLatest(ctx context.Context) ([]domain.Propagation, error) {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
+
+	if mock.ListLatestErr != nil {
+		return nil, mock.ListLatestErr
+	}
 
 	list := make([]domain.Propagation, 0, len(mock.Rows))
 	for _, rows := range mock.Rows {
