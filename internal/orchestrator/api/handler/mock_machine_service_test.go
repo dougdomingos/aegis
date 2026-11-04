@@ -17,10 +17,11 @@ import (
 // mockMachineService provides an injectable implementation of
 // handler.MachineServiceInterface for testing machine handler scenarios.
 type mockMachineService struct {
-	listFn         func(ctx context.Context) ([]schemas.MachineOutputSchema, error)
-	initiateFn     func(ctx context.Context, p schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error)
-	authenticateFn func(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
-	heartbeatFn    func(ctx context.Context, token string) error
+	listFn                 func(ctx context.Context) ([]schemas.MachineOutputSchema, error)
+	initiateFn             func(ctx context.Context, p schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error)
+	authenticateFn         func(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
+	heartbeatFn            func(ctx context.Context, token string) error
+	getPropagationStatusFn func(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error)
 }
 
 func (m *mockMachineService) ListMachines(ctx context.Context) ([]schemas.MachineOutputSchema, error) {
@@ -33,6 +34,10 @@ func (m *mockMachineService) InitiateAuthentication(ctx context.Context, p schem
 
 func (m *mockMachineService) Authenticate(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error) {
 	return m.authenticateFn(ctx, p)
+}
+
+func (m *mockMachineService) GetPropagationStatus(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error) {
+	return m.getPropagationStatusFn(ctx, machineID)
 }
 
 // ============================================================================
