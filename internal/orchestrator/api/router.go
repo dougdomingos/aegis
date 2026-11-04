@@ -50,6 +50,8 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 
 	machineStore := store.NewMachineStore(db)
 	policyStore := store.NewPolicyStore(db)
+	groupStore := store.NewGroupStore(db)
+	ruleStore := store.NewRuleStore(db)
 
 	machineService := service.NewMachineService(machineStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
 	if err := seedMachines(machineService, cfg); err != nil {
@@ -57,9 +59,9 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	}
 
 	registerHandlers(router,
-		handler.NewGroupHandler(service.NewGroupService(store.NewGroupStore(db), machineStore, policyStore, cfg.StalenessGrace, time.Now)),
+		handler.NewGroupHandler(service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, cfg.StalenessGrace, time.Now)),
 		handler.NewPolicyHandler(service.NewPolicyService(policyStore)),
-		handler.NewRuleHandler(service.NewRuleService(store.NewRuleStore(db), policyStore)),
+		handler.NewRuleHandler(service.NewRuleService(ruleStore, policyStore, groupStore)),
 		handler.NewMachineHandler(machineService),
 	)
 

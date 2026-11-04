@@ -22,4 +22,8 @@ var (
 	// ErrInvalidPolicyType is returned when the provided policy type is not a
 	// supported one (WHITELIST or BLACKLIST).
 	ErrInvalidPolicyType = errors.New("policy type must be WHITELIST or BLACKLIST")
+
+	// ErrPolicyHasNoRules is returned when an operation would leave a linked
+	// policy without rules, or would link a policy that has no rules.
+	ErrPolicyHasNoRules = errors.New("policy must have at least one rule to be linked")
 )

@@ -26,6 +26,10 @@ type GroupService struct {
 	// resolve and link policies to groups.
 	policyStore domain.PolicyStore
 
+	// ruleStore provides database operations related to rules, used to ensure
+	// a policy has rules before it is linked to a group.
+	ruleStore domain.RuleStore
+
 	// stalenessGrace is the duration a machine remains displayed as CONNECTED
 	// after its last heartbeat.
 	stalenessGrace time.Duration
@@ -35,12 +39,13 @@ type GroupService struct {
 }
 
 // NewGroupService creates a new service instance with the provided store
-// manager.
-func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
+// managers.
+func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, ruleStore domain.RuleStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
 	return &GroupService{
 		store:          store,
 		machineStore:   machineStore,
 		policyStore:    policyStore,
+		ruleStore:      ruleStore,
 		stalenessGrace: stalenessGrace,
 		now:            now,
 	}
@@ -268,6 +273,14 @@ func (service *GroupService) LinkPolicy(ctx context.Context, groupName string, p
 	}
 	if policy == nil {
 		return nil, errors.ErrPolicyNotFound
+	}
+
+	ruleCount, err := service.ruleStore.CountByPolicy(ctx, policy.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ruleCount == 0 {
+		return nil, errors.ErrPolicyHasNoRules
 	}
 
 	linked, err := service.store.LinkToPolicy(ctx, groupName, policy.ID)

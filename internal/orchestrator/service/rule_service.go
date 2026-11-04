@@ -18,12 +18,16 @@ type RuleService struct {
 	// policies provides database operations related to policies, used to
 	// scope rules into their owning policy.
 	policies domain.PolicyStore
+
+	// groups provides database operations related to groups, used to know
+	// whether a policy is linked before its rules are removed.
+	groups domain.GroupStore
 }
 
 // NewRuleService creates a new service instance with the provided store
 // managers.
-func NewRuleService(store domain.RuleStore, policies domain.PolicyStore) *RuleService {
-	return &RuleService{store: store, policies: policies}
+func NewRuleService(store domain.RuleStore, policies domain.PolicyStore, groups domain.GroupStore) *RuleService {
+	return &RuleService{store: store, policies: policies, groups: groups}
 }
 
 // CreateRule registers a new rule within the referenced policy. The policy
@@ -129,6 +133,21 @@ func (service *RuleService) RemoveRule(ctx context.Context, p schemas.RemoveRule
 	rule, err := service.getRuleFromPolicy(ctx, p.PolicyID, int64(p.ID))
 	if err != nil {
 		return err
+	}
+
+	linked, err := service.groups.IsPolicyLinked(ctx, rule.PolicyID)
+	if err != nil {
+		return err
+	}
+
+	if linked {
+		ruleCount, err := service.store.CountByPolicy(ctx, rule.PolicyID)
+		if err != nil {
+			return err
+		}
+		if ruleCount <= 1 {
+			return errors.ErrPolicyHasNoRules
+		}
 	}
 
 	if err := service.store.Remove(ctx, rule.ID); err != nil {

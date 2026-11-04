@@ -736,6 +736,57 @@ func TestRuleService_RemoveRule_WithRuleOfAnotherPolicy_RejectsRemoval(t *testin
 	}
 }
 
+func TestRuleService_RemoveRule_LastRuleOfLinkedPolicy_ReturnsErrPolicyHasNoRules(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	linkPolicyToGroup(t, ctx, env)
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if !errors.Is(err, ruleErrors.ErrPolicyHasNoRules) {
+		t.Errorf("expected error %q, got %q", ruleErrors.ErrPolicyHasNoRules, err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule == nil {
+		t.Error("expected rule to be kept untouched")
+	}
+}
+
+func TestRuleService_RemoveRule_LastRuleOfUnlinkedPolicy_RemovesRule(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule != nil {
+		t.Error("expected rule to be removed")
+	}
+}
+
+func TestRuleService_RemoveRule_RuleAmongSeveralInLinkedPolicy_RemovesRule(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	seedRule(t, ctx, env.rules, domain.NewDomainRule("google.com").WithPolicy(env.policyID).Build())
+	linkPolicyToGroup(t, ctx, env)
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule != nil {
+		t.Error("expected rule to be removed")
+	}
+}
+
 func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 	ctx, env, service := arrangeRuleServiceTest(t)
 	expectedErr := errors.New("failed to query database for rule")
@@ -755,6 +806,7 @@ func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 type ruleServiceEnv struct {
 	rules    *MockRuleStore
 	policies *MockPolicyStore
+	groups   *MockGroupStore
 	policyID int64
 }
 
@@ -767,6 +819,7 @@ func arrangeRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, ser
 	env := &ruleServiceEnv{
 		rules:    NewMockRuleStore(),
 		policies: NewMockPolicyStore(),
+		groups:   NewMockGroupStore(),
 	}
 
 	seededPolicy, err := env.policies.Create(ctx, "Default Policy", domain.WhitelistPolicyType)
@@ -775,7 +828,21 @@ func arrangeRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, ser
 	}
 
 	env.policyID = seededPolicy.ID
-	return ctx, env, *service.NewRuleService(env.rules, env.policies)
+	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups)
+}
+
+// linkPolicyToGroup creates a group and links it to the seeded policy, so
+// that the policy is in use and the rule guards apply to it.
+func linkPolicyToGroup(t *testing.T, ctx context.Context, env *ruleServiceEnv) {
+	t.Helper()
+
+	if _, err := env.groups.Create(ctx, "lab1"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+
+	if _, err := env.groups.LinkToPolicy(ctx, "lab1", env.policyID); err != nil {
+		t.Fatalf("failed to link group: %v", err)
+	}
 }
 
 // seedRule creates one rule in the mock store and fails the test on error.
