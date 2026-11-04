@@ -798,6 +798,89 @@ func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 }
 
 // ============================================================================
+// Propagation notifications
+// ============================================================================
+
+func TestRuleService_CreateRule_WithNotifier_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+
+	_, err := service.CreateRule(ctx, schemas.CreateRuleSchema{
+		PolicyID: env.policyID,
+		Type:     domain.DomainRuleType,
+		Value:    "test.com",
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+func TestRuleService_UpdateRule_WhenChanged_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	newValue := "changed.com"
+
+	_, err := service.UpdateRule(ctx, schemas.UpdateRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+		Value:    &newValue,
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+func TestRuleService_UpdateRule_WhenUnchanged_DoesNotNotify(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	sameValue := seededRule.Value
+
+	_, err := service.UpdateRule(ctx, schemas.UpdateRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+		Value:    &sameValue,
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(*log) != 0 {
+		t.Errorf("expected no notifications, got %v", *log)
+	}
+}
+
+func TestRuleService_RemoveRule_WithNotifier_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -828,7 +911,7 @@ func arrangeRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, ser
 	}
 
 	env.policyID = seededPolicy.ID
-	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups)
+	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups, nil)
 }
 
 // linkPolicyToGroup creates a group and links it to the seeded policy, so
@@ -881,4 +964,30 @@ func mapOutputToRule(output schemas.RuleOutputSchema) domain.Rule {
 		Port:      output.Port,
 		CreatedAt: output.CreatedAt,
 	}
+}
+
+// arrangeNotifiedRuleServiceTest initializes a service instance with mocked
+// store providers, a seeded policy to own rules, and a propagation notifier
+// whose calls are recorded in the returned log.
+func arrangeNotifiedRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, service.RuleService, *[]string) {
+	t.Helper()
+
+	ctx := context.Background()
+	env := &ruleServiceEnv{
+		rules:    NewMockRuleStore(),
+		policies: NewMockPolicyStore(),
+		groups:   NewMockGroupStore(),
+	}
+
+	seededPolicy, err := env.policies.Create(ctx, "Default Policy", domain.WhitelistPolicyType)
+	if err != nil {
+		t.Fatalf("failed to seed policy: %v", err)
+	}
+
+	env.policyID = seededPolicy.ID
+
+	var log []string
+	notifier := &MockPropagationNotifier{Log: &log}
+
+	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups, notifier), &log
 }

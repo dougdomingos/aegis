@@ -22,12 +22,16 @@ type RuleService struct {
 	// groups provides database operations related to groups, used to know
 	// whether a policy is linked before its rules are removed.
 	groups domain.GroupStore
+
+	// notifier propagates rule changes to the distribution pipeline. It may be
+	// nil, disabling notifications.
+	notifier PropagationNotifier
 }
 
 // NewRuleService creates a new service instance with the provided store
-// managers.
-func NewRuleService(store domain.RuleStore, policies domain.PolicyStore, groups domain.GroupStore) *RuleService {
-	return &RuleService{store: store, policies: policies, groups: groups}
+// managers and propagation notifier. The notifier may be nil.
+func NewRuleService(store domain.RuleStore, policies domain.PolicyStore, groups domain.GroupStore, notifier PropagationNotifier) *RuleService {
+	return &RuleService{store: store, policies: policies, groups: groups, notifier: notifier}
 }
 
 // CreateRule registers a new rule within the referenced policy. The policy
@@ -53,6 +57,8 @@ func (service *RuleService) CreateRule(ctx context.Context, p schemas.CreateRule
 	if err != nil {
 		return nil, fmt.Errorf("failed to register new rule: %w", err)
 	}
+
+	service.notifyPolicy(ctx, p.PolicyID)
 
 	return mapRuleToOutputSchema(newRule), nil
 }
@@ -124,6 +130,8 @@ func (service *RuleService) UpdateRule(ctx context.Context, p schemas.UpdateRule
 		return nil, err
 	}
 
+	service.notifyPolicy(ctx, p.PolicyID)
+
 	return mapRuleToOutputSchema(updatedRule), nil
 }
 
@@ -154,7 +162,19 @@ func (service *RuleService) RemoveRule(ctx context.Context, p schemas.RemoveRule
 		return fmt.Errorf("failed to remove rule %d: %v", rule.ID, err)
 	}
 
+	service.notifyPolicy(ctx, rule.PolicyID)
+
 	return nil
+}
+
+// notifyPolicy best-effort marks the policy's machines pending with package
+// intents.
+func (service *RuleService) notifyPolicy(ctx context.Context, policyID int64) {
+	if service.notifier == nil {
+		return
+	}
+
+	service.notifier.NotifyPolicy(ctx, policyID)
 }
 
 // ensurePolicyExists checks whether a policy with the provided ID exists

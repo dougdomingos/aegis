@@ -16,7 +16,14 @@ import (
 type MockGroupStore struct {
 	groups   map[int64]*domain.Group
 	StoreErr error
-	nextID   int64
+
+	// RemoveErr aborts Remove alone, leaving the rest of the store functional.
+	RemoveErr error
+
+	// RemoveLog, when set, receives "remove" on every Remove attempt, so tests
+	// can assert the delete ordering against notifier calls.
+	RemoveLog *[]string
+	nextID    int64
 }
 
 // NewMockGroupStore initializes a new MockGroupStore instance.
@@ -138,6 +145,14 @@ func (mock *MockGroupStore) ListByPolicy(ctx context.Context, policyID int64) ([
 
 // Remove deletes a group by name or returns StoreErr if set.
 func (mock *MockGroupStore) Remove(ctx context.Context, name string) error {
+	if mock.RemoveLog != nil {
+		*mock.RemoveLog = append(*mock.RemoveLog, "remove")
+	}
+
+	if mock.RemoveErr != nil {
+		return mock.RemoveErr
+	}
+
 	if mock.StoreErr != nil {
 		return mock.StoreErr
 	}

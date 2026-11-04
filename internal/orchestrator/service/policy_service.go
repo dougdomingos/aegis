@@ -16,12 +16,16 @@ type PolicyService struct {
 
 	// store provides database operations related to policies
 	store domain.PolicyStore
+
+	// notifier propagates policy changes to the distribution pipeline. It may
+	// be nil, disabling notifications.
+	notifier PropagationNotifier
 }
 
 // NewPolicyService creates a new service instance with the provided store
-// manager.
-func NewPolicyService(store domain.PolicyStore) *PolicyService {
-	return &PolicyService{store: store}
+// manager and propagation notifier. The notifier may be nil.
+func NewPolicyService(store domain.PolicyStore, notifier PropagationNotifier) *PolicyService {
+	return &PolicyService{store: store, notifier: notifier}
 }
 
 // CreatePolicy registers a new policy into the system. The name provided to
@@ -115,11 +119,17 @@ func (service *PolicyService) UpdatePolicy(ctx context.Context, payload schemas.
 		return nil, err
 	}
 
+	if service.notifier != nil {
+		service.notifier.NotifyPolicy(ctx, policy.ID)
+	}
+
 	return mapPolicyToOutputSchema(updatedPolicy), nil
 }
 
 // RemovePolicy deletes a policy from the database by its ID. If no policy
-// matches the requested ID, it returns an error.
+// matches the requested ID, it returns an error. Machines of groups linked to
+// the policy are resolved before the deletion, so a resolution failure aborts
+// it; the revoke is enqueued only after the deletion succeeds.
 func (service *PolicyService) RemovePolicy(ctx context.Context, payload schemas.RemovePolicySchema) error {
 	policy, err := service.store.GetByID(ctx, payload.ID)
 	if err != nil {
@@ -130,8 +140,20 @@ func (service *PolicyService) RemovePolicy(ctx context.Context, payload schemas.
 		return errors.ErrPolicyNotFound
 	}
 
+	var machineIDs []int64
+	if service.notifier != nil {
+		machineIDs, err = service.notifier.ResolvePolicyMachines(ctx, policy.ID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve machines of policy %d: %w", policy.ID, err)
+		}
+	}
+
 	if err := service.store.Remove(ctx, payload.ID); err != nil {
 		return fmt.Errorf("failed to remove policy %d: %v", payload.ID, err)
+	}
+
+	if service.notifier != nil {
+		service.notifier.RevokeMachines(ctx, machineIDs, policy)
 	}
 
 	return nil

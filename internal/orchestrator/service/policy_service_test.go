@@ -395,6 +395,104 @@ func TestPolicyService_RemovePolicy_WhenStoreFails_RejectsRemoval(t *testing.T) 
 }
 
 // ============================================================================
+// Propagation notifications
+// ============================================================================
+
+func TestPolicyService_UpdatePolicy_WhenRenamed_NotifiesPolicy(t *testing.T) {
+	ctx, store, service, _, log := arrangeNotifiedPolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Old Policy Name")
+
+	_, err := service.UpdatePolicy(ctx, schemas.UpdatePolicySchema{ID: seededPolicy.ID, Name: "New Policy Name"})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+func TestPolicyService_UpdatePolicy_WhenUnchanged_DoesNotNotify(t *testing.T) {
+	ctx, store, service, _, log := arrangeNotifiedPolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Old Policy Name")
+
+	_, err := service.UpdatePolicy(ctx, schemas.UpdatePolicySchema{ID: seededPolicy.ID, Name: seededPolicy.Name})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(*log) != 0 {
+		t.Errorf("expected no notifications, got %v", *log)
+	}
+}
+
+func TestPolicyService_RemovePolicy_ResolvesBeforeDeleteAndRevokesAfter(t *testing.T) {
+	ctx, store, service, notifier, log := arrangeNotifiedPolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Doomed Policy")
+	notifier.PolicyMachineIDs = []int64{7, 8}
+
+	err := service.RemovePolicy(ctx, schemas.RemovePolicySchema{ID: seededPolicy.ID})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "resolve", "remove", "revoke") {
+		t.Errorf("expected [resolve remove revoke], got %v", *log)
+	}
+
+	if len(notifier.RevokedMachineIDs) != 2 {
+		t.Errorf("expected the resolved machine IDs to be revoked, got %v", notifier.RevokedMachineIDs)
+	}
+	if notifier.RevokedPolicy == nil || notifier.RevokedPolicy.ID != seededPolicy.ID {
+		t.Errorf("expected the removed policy identity to be carried by the revoke, got %+v", notifier.RevokedPolicy)
+	}
+
+	if remaining, _ := store.GetByID(ctx, seededPolicy.ID); remaining != nil {
+		t.Errorf("expected policy to be deleted, got %+v", remaining)
+	}
+}
+
+func TestPolicyService_RemovePolicy_WhenResolveFails_DoesNotDelete(t *testing.T) {
+	ctx, store, service, notifier, log := arrangeNotifiedPolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Doomed Policy")
+	notifier.ResolvePolicyMachinesErr = errors.New("resolver unavailable")
+
+	err := service.RemovePolicy(ctx, schemas.RemovePolicySchema{ID: seededPolicy.ID})
+
+	if err == nil {
+		t.Fatal("expected an error when resolution fails, got nil")
+	}
+
+	if !logEquals(log, "resolve") {
+		t.Errorf("expected [resolve] only, got %v", *log)
+	}
+
+	if remaining, _ := store.GetByID(ctx, seededPolicy.ID); remaining == nil {
+		t.Error("expected the policy to survive a failed resolution")
+	}
+}
+
+func TestPolicyService_RemovePolicy_WhenDeleteFails_DoesNotRevoke(t *testing.T) {
+	ctx, store, service, notifier, log := arrangeNotifiedPolicyServiceTest(t)
+	seededPolicy := seedPolicy(t, ctx, store, "Doomed Policy")
+	notifier.PolicyMachineIDs = []int64{7, 8}
+	store.RemoveErr = errors.New("database unavailable")
+
+	err := service.RemovePolicy(ctx, schemas.RemovePolicySchema{ID: seededPolicy.ID})
+
+	if err == nil {
+		t.Fatal("expected an error when the delete fails, got nil")
+	}
+
+	if !logEquals(log, "resolve", "remove") {
+		t.Errorf("expected [resolve remove] with no revoke, got %v", *log)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -405,7 +503,7 @@ func arrangePolicyServiceTest(t *testing.T) (context.Context, *MockPolicyStore, 
 
 	mockStore := NewMockPolicyStore()
 	ctx := context.Background()
-	service := service.NewPolicyService(mockStore)
+	service := service.NewPolicyService(mockStore, nil)
 
 	return ctx, mockStore, *service
 }
@@ -433,4 +531,21 @@ func mapOutputToPolicy(output schemas.PolicyOutputSchema) domain.Policy {
 		CreatedAt: output.CreatedAt,
 		UpdatedAt: output.UpdatedAt,
 	}
+}
+
+// arrangeNotifiedPolicyServiceTest initializes a policy service with a mocked
+// store, a propagation notifier, and a shared call log wired into both the
+// notifier and the store's Remove.
+func arrangeNotifiedPolicyServiceTest(t *testing.T) (context.Context, *MockPolicyStore, service.PolicyService, *MockPropagationNotifier, *[]string) {
+	t.Helper()
+
+	var log []string
+	notifier := &MockPropagationNotifier{Log: &log}
+
+	mockStore := NewMockPolicyStore()
+	mockStore.RemoveLog = &log
+	ctx := context.Background()
+	policyService := service.NewPolicyService(mockStore, notifier)
+
+	return ctx, mockStore, *policyService, notifier, &log
 }
