@@ -531,6 +531,30 @@ func TestRuleService_UpdateIPRule_WithValidPayload_AcceptsUpdate(t *testing.T) {
 	}
 }
 
+func TestRuleService_UpdateRule_WithUnchangedValues_DoesNotCallStoreUpdate(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	sameValue := seededRule.Value
+
+	updatedRule, err := service.UpdateRule(
+		ctx,
+		schemas.UpdateRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID), Value: &sameValue},
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if env.rules.UpdateCalls != 0 {
+		t.Errorf("expected store update not to be called, got %d calls", env.rules.UpdateCalls)
+	}
+
+	if updatedRule.ID != int(seededRule.ID) || updatedRule.Value != seededRule.Value {
+		t.Errorf("expected returned rule to equal stored rule %+v, got %+v", seededRule, updatedRule)
+	}
+}
+
 func TestRuleService_UpdateRule_WithEmptyValue_RejectsUpdate(t *testing.T) {
 	ctx, env, service := arrangeRuleServiceTest(t)
 	seededRule := seedRule(t, ctx, env.rules,

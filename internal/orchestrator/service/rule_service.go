@@ -100,17 +100,22 @@ func (service *RuleService) UpdateRule(ctx context.Context, p schemas.UpdateRule
 		return nil, err
 	}
 
-	rule.Patch(domain.RulePatch{
+	patched := *rule
+	patched.Patch(domain.RulePatch{
 		Value:    p.Value,
 		Protocol: p.Protocol,
 		Port:     p.Port,
 	})
 
-	if err := rule.Validate(); err != nil {
+	if err := patched.Validate(); err != nil {
 		return nil, err
 	}
 
-	updatedRule, err := service.store.Update(ctx, *rule)
+	if patched.IsEqual(rule) {
+		return mapRuleToOutputSchema(rule), nil
+	}
+
+	updatedRule, err := service.store.Update(ctx, patched)
 	if err != nil {
 		return nil, err
 	}
