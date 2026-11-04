@@ -33,6 +33,11 @@ Acceptance criteria (from the issue):
 - Rule/policy propagation consequences (later stories).
 - UI.
 
+**Follow-up:** linking now requires the policy to have at least one rule. Linking
+a policy with no rules is rejected with `409`, and so is removing the last rule of
+a linked policy. See
+[`2026-11-03-policy-version-and-empty-policy-guards-design.md`](2026-11-03-policy-version-and-empty-policy-guards-design.md).
+
 ## 3. Decisions
 
 | Decision | Choice | Rationale |
