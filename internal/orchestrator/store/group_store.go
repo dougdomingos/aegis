@@ -14,6 +14,7 @@ const (
 	queryGetGroupByID          = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id WHERE g.id = ?"
 	queryGetGroupByName        = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id WHERE g.name = ?"
 	queryGetAllGroups          = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id"
+	queryListGroupsByPolicy    = "SELECT g.id, g.name, g.created_at, g.policy_id, p.name FROM groups g LEFT JOIN policies p ON p.id = g.policy_id WHERE g.policy_id = ?"
 	queryUpdateGroup           = "UPDATE groups SET name = ? WHERE id = ?"
 	queryDeleteGroupByName     = "DELETE FROM groups WHERE name = ?"
 	queryLinkGroupToPolicy     = "UPDATE groups SET policy_id = ? WHERE name = ?"
@@ -112,6 +113,10 @@ func (store *GroupStore) Update(ctx context.Context, group domain.Group) (*domai
 
 func (store *GroupStore) List(ctx context.Context) ([]domain.Group, error) {
 	return store.executor.QueryMany(ctx, queryGetAllGroups)
+}
+
+func (store *GroupStore) ListByPolicy(ctx context.Context, policyID int64) ([]domain.Group, error) {
+	return store.executor.QueryMany(ctx, queryListGroupsByPolicy, policyID)
 }
 
 func (store *GroupStore) Remove(ctx context.Context, name string) error {

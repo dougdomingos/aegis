@@ -120,6 +120,22 @@ func (mock *MockGroupStore) List(ctx context.Context) ([]domain.Group, error) {
 	return list, nil
 }
 
+// ListByPolicy returns the groups linked to the provided policy.
+func (mock *MockGroupStore) ListByPolicy(ctx context.Context, policyID int64) ([]domain.Group, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	linked := make([]domain.Group, 0)
+	for _, group := range mock.groups {
+		if group.PolicyID != nil && *group.PolicyID == policyID {
+			linked = append(linked, *group)
+		}
+	}
+
+	return linked, nil
+}
+
 // Remove deletes a group by name or returns StoreErr if set.
 func (mock *MockGroupStore) Remove(ctx context.Context, name string) error {
 	if mock.StoreErr != nil {
