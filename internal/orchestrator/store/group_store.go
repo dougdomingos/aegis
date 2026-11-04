@@ -18,18 +18,30 @@ const (
 	queryDeleteGroupByName     = "DELETE FROM groups WHERE name = ?"
 	queryLinkGroupToPolicy     = "UPDATE groups SET policy_id = ? WHERE name = ?"
 	queryUnlinkGroupFromPolicy = "UPDATE groups SET policy_id = NULL WHERE name = ?"
+	queryPolicyIsLinked        = "SELECT EXISTS(SELECT 1 FROM groups WHERE policy_id = ?)"
 )
 
 // GroupStore manages all database-related operations over groups.
 type GroupStore struct {
+	db       *sql.DB
 	executor *query.QueryExecutor[domain.Group]
 }
 
 // NewGroupStore creates a new GroupStore instance.
 func NewGroupStore(db *sql.DB) *GroupStore {
 	return &GroupStore{
+		db:       db,
 		executor: query.NewQueryExecutor(db, mapRowToGroup),
 	}
+}
+
+func (store *GroupStore) IsPolicyLinked(ctx context.Context, policyID int64) (bool, error) {
+	var linked bool
+	if err := store.db.QueryRowContext(ctx, queryPolicyIsLinked, policyID).Scan(&linked); err != nil {
+		return false, fmt.Errorf("failed to check links of policy %d: %w", policyID, err)
+	}
+
+	return linked, nil
 }
 
 func (store *GroupStore) Create(ctx context.Context, name string) (*domain.Group, error) {

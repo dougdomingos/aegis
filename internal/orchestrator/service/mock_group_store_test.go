@@ -180,3 +180,19 @@ func (mock *MockGroupStore) UnlinkFromPolicy(ctx context.Context, groupName stri
 
 	return group, nil
 }
+
+// IsPolicyLinked reports whether any group is linked to a policy, or returns
+// StoreErr if set.
+func (mock *MockGroupStore) IsPolicyLinked(ctx context.Context, policyID int64) (bool, error) {
+	if mock.StoreErr != nil {
+		return false, mock.StoreErr
+	}
+
+	for _, group := range mock.groups {
+		if group.PolicyID != nil && *group.PolicyID == policyID {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}

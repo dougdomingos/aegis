@@ -151,4 +151,8 @@ type RuleStore interface {
 
 	// Remove removes the rule whose ID matches the provided argument.
 	Remove(ctx context.Context, id int64) error
+
+	// CountByPolicy returns the number of rules that belong to the policy whose
+	// ID matches the provided argument.
+	CountByPolicy(ctx context.Context, policyID int64) (int64, error)
 }
