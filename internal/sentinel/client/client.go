@@ -9,15 +9,21 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
 
 	"dougdomingos.com/aegis/internal/common/auth"
 	"dougdomingos.com/aegis/internal/common/errors"
+	"dougdomingos.com/aegis/internal/common/propagation"
 	"dougdomingos.com/aegis/internal/common/schemas"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
+	"dougdomingos.com/aegis/pkg/pb"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 const (
@@ -29,6 +35,9 @@ const (
 
 	// heartbeatPath is the path of the connectivity heartbeat endpoint.
 	heartbeatPath = "/machines/heartbeat"
+
+	// maxMessageSize mirrors the Orchestrator's gRPC send/receive limit.
+	maxMessageSize = 16 << 20
 )
 
 // Client performs authenticated requests against the Orchestrator API.
@@ -44,16 +53,49 @@ type Client struct {
 
 	// logger records the operations performed by the client.
 	logger *slog.Logger
+
+	// connection is the gRPC channel to the Orchestrator's propagation server.
+	connection *grpc.ClientConn
+
+	// propagation is the generated Propagation API stub.
+	propagation pb.PropagationClient
 }
 
-// New creates a Client for the Orchestrator API at the provided base URL.
-func New(baseURL *url.URL, labKey []byte, timeout time.Duration, logger *slog.Logger) *Client {
-	return &Client{
-		baseURL:    baseURL,
-		httpClient: &http.Client{Timeout: timeout},
-		labKey:     labKey,
-		logger:     logger,
+// New creates a Client for the Orchestrator API at the provided base URL and
+// gRPC propagation address.
+func New(baseURL *url.URL, propagationAddress string, labKey []byte, timeout time.Duration, logger *slog.Logger) (*Client, error) {
+	host, port, err := net.SplitHostPort(propagationAddress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid propagation address %q: %w", propagationAddress, err)
 	}
+
+	if host == "" || port == "" {
+		return nil, fmt.Errorf("invalid propagation address %q: host and port must not be empty", propagationAddress)
+	}
+
+	connection, err := grpc.NewClient(propagationAddress,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxMessageSize),
+			grpc.MaxCallSendMsgSize(maxMessageSize),
+		))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create propagation connection: %w", err)
+	}
+
+	return &Client{
+		baseURL:     baseURL,
+		httpClient:  &http.Client{Timeout: timeout},
+		labKey:      labKey,
+		logger:      logger,
+		connection:  connection,
+		propagation: pb.NewPropagationClient(connection),
+	}, nil
+}
+
+// Close releases the gRPC propagation connection.
+func (c *Client) Close() error {
+	return c.connection.Close()
 }
 
 // Authenticate performs the two-step challenge-response authentication of the
@@ -87,10 +129,51 @@ func (c *Client) Authenticate(ctx context.Context, id identity.Identity) (*daemo
 	return &daemon.Session{
 		Token:       authenticated.SessionToken,
 		ExpiresAt:   authenticated.ExpiresAt,
+		MachineID:   authenticated.Machine.ID,
 		MachineName: authenticated.Machine.Name,
 		IP:          id.IP,
 		MAC:         id.MAC,
 	}, nil
+}
+
+// ConnectPropagation opens the authenticated propagation stream at the
+// Orchestrator, presenting the session token as bearer metadata. The returned
+// stream delivers messages with Recv and returns acknowledgements with Send.
+func (c *Client) ConnectPropagation(ctx context.Context, token string) (propagation.Stream, error) {
+	streamCtx := metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+
+	stream, err := c.propagation.Connect(streamCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open propagation stream: %w", err)
+	}
+
+	return &propagationStream{stream: stream}, nil
+}
+
+// propagationStream adapts the generated bidi stream to the transport-neutral
+// propagation.Stream contract.
+type propagationStream struct {
+	stream pb.Propagation_ConnectClient
+}
+
+// Recv receives and converts one server message.
+func (s *propagationStream) Recv() (*propagation.Message, error) {
+	message, err := s.stream.Recv()
+	if err != nil {
+		return nil, err
+	}
+
+	return fromProtoServerMessage(message)
+}
+
+// Send delivers one acknowledgement over the stream.
+func (s *propagationStream) Send(ack propagation.Ack) error {
+	return s.stream.Send(toProtoAck(ack))
+}
+
+// CloseSend half-closes the stream, signalling the end of acknowledgements.
+func (s *propagationStream) CloseSend() error {
+	return s.stream.CloseSend()
 }
 
 // post sends a JSON request to the provided path of the Orchestrator API and

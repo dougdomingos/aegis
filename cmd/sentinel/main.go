@@ -53,7 +53,15 @@ func run() int {
 	defer stop()
 
 	detector := identity.NewDetector()
-	orchestrator := client.New(cfg.OrchestratorURL, cfg.LabKey, cfg.RequestTimeout, logger)
+	orchestrator, err := client.New(cfg.OrchestratorURL, cfg.PropagationAddress, cfg.LabKey, cfg.RequestTimeout, logger)
+	if err != nil {
+		logger.Error("failed to initialize client", "error", err)
+
+		return 1
+	}
+
+	defer orchestrator.Close()
+
 	heartbeats := heartbeat.New(cfg.HeartbeatInterval, orchestrator, orchestrator, logger)
 
 	logger.Info("configuration loaded",
