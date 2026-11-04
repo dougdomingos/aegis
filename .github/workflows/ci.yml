@@ -7,6 +7,8 @@ on:
       - "**.go"
       - "go.mod"
       - "go.sum"
+      - "proto/**"
+      - "Makefile"
       - ".github/workflows/ci.yml"
       - "e2e/**"
       - ".dockerignore"
@@ -17,6 +19,8 @@ on:
       - "**.go"
       - "go.mod"
       - "go.sum"
+      - "proto/**"
+      - "Makefile"
       - ".github/workflows/ci.yml"
       - "e2e/**"
       - ".dockerignore"
@@ -35,6 +39,14 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+
+      - name: Install protobuf toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run tests with coverage
         run: make coverage
@@ -75,6 +87,14 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
+
+      - name: Install protobuf toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run end-to-end suite
         run: make e2e
