@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -42,9 +43,20 @@ func seedMachines(s *service.MachineService, cfg *config.Config) error {
 	return nil
 }
 
-// NewRouter builds the shared HTTP router, synchronizing the configured
-// machine sources into the database before registering their routes.
-func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
+// Runtime bundles the HTTP handler with the propagation service that shares
+// its stores, so the process can start both servers over one configuration.
+type Runtime struct {
+	// HTTP is the fully wired admin API router.
+	HTTP http.Handler
+
+	// Propagation is the service responsible for distributing rule packages to
+	// the Sentinels.
+	Propagation *service.PropagationService
+}
+
+// NewRuntime builds the HTTP router and the propagation service that shares
+// the same stores and notifier.
+func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, error) {
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
 
@@ -54,17 +66,34 @@ func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	ruleStore := store.NewRuleStore(db)
 	propagationStore := store.NewPropagationStore(db)
 
-	machineService := service.NewMachineService(machineStore, propagationStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
+	propagationService := service.NewPropagationService(
+		machineStore, groupStore, policyStore, ruleStore, propagationStore, logger, time.Now)
+
+	machineService := service.NewMachineService(
+		machineStore, propagationStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
+
 	if err := seedMachines(machineService, cfg); err != nil {
 		return nil, err
 	}
 
 	registerHandlers(router,
-		handler.NewGroupHandler(service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, cfg.StalenessGrace, time.Now)),
-		handler.NewPolicyHandler(service.NewPolicyService(policyStore, nil)),
-		handler.NewRuleHandler(service.NewRuleService(ruleStore, policyStore, groupStore, nil)),
+		handler.NewGroupHandler(service.NewGroupService(
+			groupStore, machineStore, policyStore, ruleStore, propagationService, cfg.StalenessGrace, time.Now)),
+		handler.NewPolicyHandler(service.NewPolicyService(policyStore, propagationService)),
+		handler.NewRuleHandler(service.NewRuleService(ruleStore, policyStore, groupStore, propagationService)),
 		handler.NewMachineHandler(machineService),
 	)
 
-	return router, nil
+	return &Runtime{HTTP: router, Propagation: propagationService}, nil
+}
+
+// NewRouter builds the shared HTTP router, synchronizing the configured
+// machine sources into the database before registering their routes.
+func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
+	runtime, err := NewRuntime(db, cfg, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return runtime.HTTP, nil
 }

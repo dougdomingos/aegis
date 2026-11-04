@@ -263,6 +263,59 @@ func TestConfig_Load_WithoutMachinesFile_LogsWarning(t *testing.T) {
 	}
 }
 
+func TestConfig_Load_WithoutGRPCAddr_DefaultsToPort9090(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+
+	cfg, err := config.Load()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.GRPCAddr != ":9090" {
+		t.Errorf("expected default gRPC address %q, got %q", ":9090", cfg.GRPCAddr)
+	}
+}
+
+func TestConfig_Load_WithGRPCAddr_ReturnsConfiguredAddress(t *testing.T) {
+	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+	t.Setenv("AEGIS_GRPC_ADDR", "10.0.0.5:9091")
+
+	cfg, err := config.Load()
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if cfg.GRPCAddr != "10.0.0.5:9091" {
+		t.Errorf("expected gRPC address %q, got %q", "10.0.0.5:9091", cfg.GRPCAddr)
+	}
+}
+
+func TestConfig_Load_WithInvalidGRPCAddr_ReturnsError(t *testing.T) {
+	cases := map[string]struct {
+		addr string
+	}{
+		"no colon":     {addr: "9090"},
+		"empty host":   {addr: ":abc"},
+		"port too big": {addr: ":70000"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
+			t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
+			t.Setenv("AEGIS_GRPC_ADDR", tc.addr)
+
+			if _, err := config.Load(); err == nil {
+				t.Errorf("expected an error for gRPC address %q, got nil", tc.addr)
+			}
+		})
+	}
+}
+
 // writeTempFile writes content to a temporary file and returns its path.
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
