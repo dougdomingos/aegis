@@ -120,6 +120,48 @@ func TestRunner_Run_WhenUnauthenticated_RenewsSessionAndRetries(t *testing.T) {
 	}
 }
 
+func TestRunner_Run_WhenRenewedTokenStillRejected_BacksOffInsteadOfSpinning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newRecordingStateStore()
+	connector := newFakeConnector()
+	connector.alwaysErr = status.Error(codes.Unauthenticated, "invalid session token")
+
+	renewer := newFakeRenewer(&daemon.Session{
+		Token:       "renewed-token",
+		MachineID:   7,
+		MachineName: "lcc1-001",
+		IP:          "10.0.1.11",
+		MAC:         "aa:bb:cc:dd:ee:ff",
+	})
+
+	runner := sentinelPropagation.New(store, connector, renewer, discardLogger())
+
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx, runnerSession()) }()
+
+	// The first cycle fails, renews, and must sleep the initial backoff
+	// before retrying the rejected token: a tight loop would renew
+	// hundreds of times within this window.
+	time.Sleep(300 * time.Millisecond)
+
+	if calls := renewer.calls(); calls > 2 {
+		t.Errorf("renewal calls = %d, want at most 2 within the initial 1s backoff", calls)
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run() = %v, want nil after cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+}
+
 func TestRunner_Run_WhenContextCancelled_ReturnsNil(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -175,66 +217,25 @@ func TestRunner_Run_WhenStateFileCorrupt_StartsFromZeroState(t *testing.T) {
 	waitForCondition(t, func() bool { return store.saves() == 1 })
 }
 
-func TestRunner_Run_WhenRenewedTokenStillRejected_BacksOffInsteadOfSpinning(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := newRecordingStateStore()
-	connector := newFakeConnector()
-	connector.alwaysErr = status.Error(codes.Unauthenticated, "invalid session token")
-
-	renewer := newFakeRenewer(&daemon.Session{
-		Token:       "renewed-token",
-		MachineID:   7,
-		MachineName: "lcc1-001",
-		IP:          "10.0.1.11",
-		MAC:         "aa:bb:cc:dd:ee:ff",
-	})
-
-	runner := sentinelPropagation.New(store, connector, renewer, discardLogger())
-
-	done := make(chan error, 1)
-	go func() { done <- runner.Run(ctx, runnerSession()) }()
-
-	// The first cycle fails, renews, and must sleep the initial backoff
-	// before retrying the rejected token: a tight loop would renew
-	// hundreds of times within this window.
-	time.Sleep(300 * time.Millisecond)
-
-	if calls := renewer.calls(); calls > 2 {
-		t.Errorf("renewal calls = %d, want at most 2 within the initial 1s backoff", calls)
-	}
-
-	cancel()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("Run() = %v, want nil after cancellation", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Run() did not return after cancellation")
-	}
-}
-
 // ============================================================================
 // Fixtures
 // ============================================================================
 
 // recordingStateStore is a sentinelPropagation.StateStore double that records
-// saves and can fail Load or Save.
+// saves and can fail Load or Save, or serve a seeded load state.
 type recordingStateStore struct {
 	mu      sync.Mutex
 	stored  []sentinelPropagation.State
+	loaded  sentinelPropagation.State
 	loadErr error
 	saveErr error
 }
 
 func newRecordingStateStore() *recordingStateStore {
-	return &recordingStateStore{}
+	return &recordingStateStore{loaded: sentinelPropagation.State{Rules: []propagation.Rule{}}}
 }
 
-// Load returns a zero state, or the injected error.
+// Load returns the seeded state, or the injected error.
 func (fake *recordingStateStore) Load() (sentinelPropagation.State, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
@@ -243,7 +244,7 @@ func (fake *recordingStateStore) Load() (sentinelPropagation.State, error) {
 		return sentinelPropagation.State{}, fake.loadErr
 	}
 
-	return sentinelPropagation.State{Rules: []propagation.Rule{}}, nil
+	return fake.loaded, nil
 }
 
 // Save records the state, or returns the injected error.
@@ -265,6 +266,22 @@ func (fake *recordingStateStore) setLoadErr(err error) {
 	defer fake.mu.Unlock()
 
 	fake.loadErr = err
+}
+
+// setLoadState seeds the state Load reports to the runner.
+func (fake *recordingStateStore) setLoadState(state sentinelPropagation.State) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+
+	fake.loaded = state
+}
+
+// setSaveErr makes every Save return the injected error.
+func (fake *recordingStateStore) setSaveErr(err error) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+
+	fake.saveErr = err
 }
 
 func (fake *recordingStateStore) saves() int {
@@ -293,6 +310,7 @@ type fakeStream struct {
 	consumed int
 	recvErr  error
 	blocked  chan struct{}
+	wake     chan struct{}
 	closed   bool
 
 	acks chan propagation.Ack
@@ -301,15 +319,21 @@ type fakeStream struct {
 func newFakeStream() *fakeStream {
 	return &fakeStream{
 		blocked: make(chan struct{}),
+		wake:    make(chan struct{}, 1),
 		acks:    make(chan propagation.Ack, 8),
 	}
 }
 
+// push queues a message and wakes a Recv that is already waiting.
 func (fake *fakeStream) push(message *propagation.Message) {
 	fake.mu.Lock()
-	defer fake.mu.Unlock()
-
 	fake.queued = append(fake.queued, message)
+	fake.mu.Unlock()
+
+	select {
+	case fake.wake <- struct{}{}:
+	default:
+	}
 }
 
 // failAfter makes every Recv after the queued messages return the error.
@@ -331,26 +355,33 @@ func (fake *fakeStream) unblock() {
 	}
 }
 
-// Recv delivers queued messages, then the injected failure or io.EOF.
+// Recv delivers queued messages, then the injected failure, or — once the
+// stream is unblocked — io.EOF.
 func (fake *fakeStream) Recv() (*propagation.Message, error) {
-	fake.mu.Lock()
-	if fake.consumed < len(fake.queued) {
-		message := fake.queued[fake.consumed]
-		fake.consumed++
+	for {
+		fake.mu.Lock()
+		if fake.consumed < len(fake.queued) {
+			message := fake.queued[fake.consumed]
+			fake.consumed++
+			fake.mu.Unlock()
+
+			return message, nil
+		}
+
+		err := fake.recvErr
+		blocked := fake.blocked
 		fake.mu.Unlock()
 
-		return message, nil
+		if err != nil {
+			return nil, err
+		}
+
+		select {
+		case <-fake.wake:
+		case <-blocked:
+			return nil, io.EOF
+		}
 	}
-
-	err := fake.recvErr
-	fake.mu.Unlock()
-
-	if err != nil {
-		return nil, err
-	}
-
-	<-fake.blocked
-	return nil, io.EOF
 }
 
 // Send records one acknowledgement.
@@ -372,7 +403,8 @@ type connectAttempt struct {
 }
 
 // fakeConnector is a sentinelPropagation.Connector double serving queued
-// outcomes and recording the token of every attempt.
+// outcomes and recording the token of every attempt. When alwaysErr is set,
+// every attempt fails with it instead.
 type fakeConnector struct {
 	mu        sync.Mutex
 	attempts  []connectAttempt
@@ -399,7 +431,8 @@ func (fake *fakeConnector) enqueueError(err error) {
 	fake.attempts = append(fake.attempts, connectAttempt{err: err})
 }
 
-// ConnectPropagation consumes the next queued outcome.
+// ConnectPropagation consumes the next queued outcome, or the injected
+// always-failing error.
 func (fake *fakeConnector) ConnectPropagation(ctx context.Context, token string) (propagation.Stream, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
