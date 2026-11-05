@@ -49,6 +49,32 @@ make build   # produce bin/aegis-orchestrator and bin/aegis-sentinel
 The generated code under `pkg/pb` is never committed; `make tests`,
 `make coverage` and `make e2e` run `make proto` as a prerequisite.
 
+### KVM filtering tests
+
+The VM suite runs the real binaries in KVM VMs on an isolated network and checks
+that real connections are blocked or allowed for WHITELIST and BLACKLIST
+policies, each with domain and IP rules. It also covers revoking a policy and
+rebooting a Sentinel. It runs locally and manually, not in CI.
+
+Prerequisites: a running `libvirtd`, membership in the `kvm` and `libvirt`
+groups, `virt-install`, `genisoimage` or `xorriso`, `openssl`, and about 5 GB of
+free disk space. The test network uses `192.168.150.0/24`, which must be free.
+
+```bash
+make vm-up     # build the base image if needed, then start the lab
+make vm-test   # run the suite against the lab
+make vm-down   # remove VMs, network and local state, keeping the base image
+make vm-clean  # also remove the base image and the storage pool
+```
+
+`make vm-test` refuses to run if the code changed since `make vm-up`, because the
+lab would be testing old binaries. Run `make vm-up` again to redeploy.
+
+The first `make vm-up` needs internet access to download an Ubuntu 24.04 cloud
+image and install packages. Ubuntu 24.04 is the base of Linux Mint 22; it stands
+in for Mint, which has no cloud image. After that, the VMs have no internet
+access.
+
 ### Orchestrator configuration
 
 The Orchestrator reads environment variables, documented in `.env.example`.

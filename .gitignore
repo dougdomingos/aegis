@@ -36,3 +36,5 @@ go.work.sum
 
 # Auto-generated protobuf code
 pkg/pb/**
+# VM test suite state (throwaway keys, binaries)
+vm/.state/
