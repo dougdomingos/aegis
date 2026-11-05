@@ -3,6 +3,10 @@
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
 TEST_PACKAGES = ./internal/orchestrator/store \
+	./internal/common/rules \
+	./internal/common/propagation \
+	./internal/orchestrator/api/grpcserver \
+	./internal/sentinel/propagation \
 	./internal/orchestrator/service \
 	./internal/orchestrator/config \
 	./internal/common/auth \
