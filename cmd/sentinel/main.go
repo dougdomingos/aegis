@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"slices"
 	"syscall"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"dougdomingos.com/aegis/internal/sentinel/filtering/dnsserver"
 	"dougdomingos.com/aegis/internal/sentinel/filtering/nftables"
 	"dougdomingos.com/aegis/internal/sentinel/heartbeat"
+	"dougdomingos.com/aegis/internal/sentinel/hostresolve"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/internal/sentinel/logging"
 	sentinelPropagation "dougdomingos.com/aegis/internal/sentinel/propagation"
@@ -31,6 +31,9 @@ import (
 // before the graceful shutdown starts, so that a pair of signals sent in
 // quick succession still forces the exit.
 const secondSignalGrace = 50 * time.Millisecond
+
+// lookupTimeout bounds each Orchestrator hostname lookup at startup.
+const lookupTimeout = 5 * time.Second
 
 // defaultConfigPath is the location the Sentinel reads its configuration
 // from when the -config flag is not provided.
@@ -94,8 +97,11 @@ func run() int {
 		// The Orchestrator addresses are resolved once at startup; a later
 		// address change requires restarting the Sentinel.
 		essentials = sentinelPropagation.Essentials{
-			OrchestratorIPs: resolveOrchestratorIPs(cfg.OrchestratorURL, cfg.PropagationAddress, logger),
+			OrchestratorIPs: resolveOrchestratorIPs(cfg.OrchestratorURL, cfg.PropagationAddress, cfg.DNSUpstreamServers, logger),
 			UpstreamDNSIPs:  cfg.DNSUpstreamServers,
+		}
+		if len(essentials.OrchestratorIPs) == 0 {
+			logger.Warn("no Orchestrator address resolved; a whitelist policy would block Orchestrator traffic")
 		}
 
 		tasks = append(tasks, daemon.Task{
@@ -116,10 +122,14 @@ func run() int {
 		"rules_state_path", cfg.RulesStatePath,
 		"request_timeout", cfg.RequestTimeout,
 		"heartbeat_interval", cfg.HeartbeatInterval,
-		"filtering_enabled", cfg.FilteringEnabled,
-		"dns_listen_address", cfg.DNSListenAddress,
-		"dns_upstream_servers", cfg.DNSUpstreamServers,
-		"nft_binary_path", cfg.NftBinaryPath)
+		"filtering_enabled", cfg.FilteringEnabled)
+
+	if cfg.FilteringEnabled {
+		logger.Info("filtering configuration",
+			"dns_listen_address", cfg.DNSListenAddress,
+			"dns_upstream_servers", cfg.DNSUpstreamServers,
+			"nft_binary_path", cfg.NftBinaryPath)
+	}
 
 	tasks = append(tasks,
 		daemon.Task{Name: "heartbeat", Run: heartbeats.Run},
@@ -175,10 +185,10 @@ func notifySignals(logger *slog.Logger) (context.Context, func()) {
 	return ctx, stop
 }
 
-// resolveOrchestratorIPs returns the deduplicated IP addresses of the
-// Orchestrator REST and propagation hosts. Hosts that fail to resolve are
-// logged and skipped.
-func resolveOrchestratorIPs(restURL *url.URL, propagationAddress string, logger *slog.Logger) []string {
+// resolveOrchestratorIPs returns the IP addresses of the Orchestrator REST and
+// propagation hosts, resolved through the first upstream DNS server because
+// the embedded DNS server is not serving yet at startup.
+func resolveOrchestratorIPs(restURL *url.URL, propagationAddress string, upstreams []string, logger *slog.Logger) []string {
 	hosts := []string{restURL.Hostname()}
 	if host, _, err := net.SplitHostPort(propagationAddress); err == nil {
 		hosts = append(hosts, host)
@@ -186,26 +196,10 @@ func resolveOrchestratorIPs(restURL *url.URL, propagationAddress string, logger 
 		hosts = append(hosts, propagationAddress)
 	}
 
-	var ips []string
-
-	for _, host := range hosts {
-		if host == "" {
-			continue
-		}
-
-		addrs, err := net.LookupHost(host)
-		if err != nil {
-			logger.Warn("failed to resolve orchestrator host", "host", host, "error", err)
-
-			continue
-		}
-
-		for _, addr := range addrs {
-			if !slices.Contains(ips, addr) {
-				ips = append(ips, addr)
-			}
-		}
+	dnsServer := ""
+	if len(upstreams) > 0 {
+		dnsServer = upstreams[0]
 	}
 
-	return ips
+	return hostresolve.IPs(hosts, dnsServer, lookupTimeout, logger)
 }
