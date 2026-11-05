@@ -3,7 +3,6 @@ package nftables
 
 import (
 	"fmt"
-	"net"
 	"strings"
 
 	"dougdomingos.com/aegis/internal/common/propagation"
@@ -19,13 +18,24 @@ const (
 	// owns: family inet, table aegis.
 	tableDeclaration = "table inet aegis"
 
-	// resolvedSetName is the IPv4 named set the DNS backend fills with the
+	// ResolvedSetName is the IPv4 named set the DNS backend fills with the
 	// answer addresses of allowed resolutions.
-	resolvedSetName = "aegis_resolved"
+	ResolvedSetName = "aegis_resolved"
 
-	// resolvedSetName6 is the IPv6 companion of resolvedSetName.
-	resolvedSetName6 = "aegis_resolved6"
+	// ResolvedSetName6 is the IPv6 companion of ResolvedSetName.
+	ResolvedSetName6 = "aegis_resolved6"
 )
+
+// supportedProtocols lists the protocols the renderer may emit as nftables
+// clauses, keyed by their lowercase keywords. A rule naming any other
+// protocol is skipped: nftables would reject its clause and abort the whole
+// `nft -f` file.
+var supportedProtocols = map[string]struct{}{
+	"tcp":  {},
+	"udp":  {},
+	"sctp": {},
+	"dccp": {},
+}
 
 // RenderRuleset renders the complete `nft -f` input that replaces the Aegis
 // nftables table with the ruleset enforcing the provided snapshot. A
@@ -34,7 +44,8 @@ const (
 // traffic; a BLACKLIST snapshot yields a default-accept output chain that
 // drops exactly the listed IP rules. Any other policy type renders the
 // permissive BLACKLIST shape so an unexpected value never strands the
-// machine.
+// machine. Rules whose protocol or port clauses nftables cannot express are
+// skipped rather than rendered, so one bad rule cannot abort the whole file.
 func RenderRuleset(snapshot filtering.PolicySnapshot) string {
 	var ruleset strings.Builder
 
@@ -76,8 +87,8 @@ func writeTableReplacement(ruleset *strings.Builder) {
 // renderWhitelist renders the empty resolved-IP sets and the default-drop
 // output chain that enforce a WHITELIST snapshot.
 func renderWhitelist(ruleset *strings.Builder, snapshot filtering.PolicySnapshot) {
-	fmt.Fprintf(ruleset, "\tset %s {\n\t\ttype ipv4_addr\n\t}\n\n", resolvedSetName)
-	fmt.Fprintf(ruleset, "\tset %s {\n\t\ttype ipv6_addr\n\t}\n\n", resolvedSetName6)
+	fmt.Fprintf(ruleset, "\tset %s {\n\t\ttype ipv4_addr\n\t}\n\n", ResolvedSetName)
+	fmt.Fprintf(ruleset, "\tset %s {\n\t\ttype ipv6_addr\n\t}\n\n", ResolvedSetName6)
 
 	fmt.Fprintln(ruleset, "\tchain output {")
 	fmt.Fprintln(ruleset, "\t\ttype filter hook output priority filter; policy drop;")
@@ -91,8 +102,8 @@ func renderWhitelist(ruleset *strings.Builder, snapshot filtering.PolicySnapshot
 		writeRuleStatements(ruleset, rule, "accept")
 	}
 
-	fmt.Fprintf(ruleset, "\t\tip daddr @%s accept\n", resolvedSetName)
-	fmt.Fprintf(ruleset, "\t\tip6 daddr @%s accept\n", resolvedSetName6)
+	fmt.Fprintf(ruleset, "\t\tip daddr @%s accept\n", ResolvedSetName)
+	fmt.Fprintf(ruleset, "\t\tip6 daddr @%s accept\n", ResolvedSetName6)
 
 	for _, address := range snapshot.OrchestratorIPs {
 		fmt.Fprintf(ruleset, "\t\t%s accept\n", destinationMatch(address))
@@ -116,53 +127,64 @@ func renderBlacklist(ruleset *strings.Builder, snapshot filtering.PolicySnapshot
 }
 
 // writeRuleStatements writes the nft statements enforcing one rule with the
-// given verdict, skipping DOMAIN rules, which the DNS backend enforces.
+// given verdict. DOMAIN rules are skipped, as the DNS backend enforces them,
+// and so are rules whose protocol or port clauses nftables cannot express:
+// an unparseable clause would abort the whole `nft -f` file, and skipping
+// keeps one bad rule from disabling the ruleset.
 func writeRuleStatements(ruleset *strings.Builder, rule propagation.Rule, verdict string) {
 	if rule.Type != ruleTypeIP {
 		return
 	}
 
-	destination := destinationMatch(rule.Value)
-
 	switch {
-	case rule.Protocol != nil && rule.Port != nil:
-		protocol := strings.ToLower(*rule.Protocol)
-		fmt.Fprintf(ruleset, "\t\t%s %s dport %d %s\n", destination, protocol, *rule.Port, verdict)
+	case rule.Port != nil:
+		// A destination-port clause needs a protocol nftables can match by
+		// port; a port with no protocol at all is equally inexpressible.
+		protocol, ok := supportedProtocol(rule.Protocol)
+		if !ok {
+			return
+		}
+
+		fmt.Fprintf(ruleset, "\t\t%s %s dport %d %s\n", destinationMatch(rule.Value), protocol, *rule.Port, verdict)
 
 	case rule.Protocol != nil:
-		protocol := strings.ToLower(*rule.Protocol)
-		fmt.Fprintf(ruleset, "\t\t%s meta l4proto %s %s\n", destination, protocol, verdict)
+		// Without a port, the protocol still has to be one nftables knows
+		// by name, or the clause would be rejected.
+		protocol, ok := supportedProtocol(rule.Protocol)
+		if !ok {
+			return
+		}
 
-	case rule.Port != nil:
-		fmt.Fprintf(ruleset, "\t\t%s tcp dport %d %s\n", destination, *rule.Port, verdict)
-		fmt.Fprintf(ruleset, "\t\t%s udp dport %d %s\n", destination, *rule.Port, verdict)
+		fmt.Fprintf(ruleset, "\t\t%s meta l4proto %s %s\n", destinationMatch(rule.Value), protocol, verdict)
 
 	default:
-		fmt.Fprintf(ruleset, "\t\t%s %s\n", destination, verdict)
+		fmt.Fprintf(ruleset, "\t\t%s %s\n", destinationMatch(rule.Value), verdict)
 	}
 }
 
+// supportedProtocol resolves a rule protocol to the lowercase nftables
+// keyword the renderer may emit, reporting whether it is supported.
+func supportedProtocol(protocol *string) (string, bool) {
+	if protocol == nil {
+		return "", false
+	}
+
+	keyword := strings.ToLower(*protocol)
+	if _, ok := supportedProtocols[keyword]; !ok {
+		return "", false
+	}
+
+	return keyword, true
+}
+
 // destinationMatch renders the destination-address match for one address or
-// prefix, selecting the IPv6 family for IPv6 values. Values that parse as
-// neither match as IPv4, letting `nft -f` reject malformed input so the
-// applying executor fails open.
+// prefix: values containing a colon use the IPv6 family, everything else
+// matches as IPv4. Malformed values are still passed through so `nft -f`
+// rejects them and the applying executor fails open.
 func destinationMatch(value string) string {
-	if isIPv6Value(value) {
+	if strings.Contains(value, ":") {
 		return "ip6 daddr " + value
 	}
 
 	return "ip daddr " + value
-}
-
-// isIPv6Value reports whether the value is an IPv6 address or prefix.
-func isIPv6Value(value string) bool {
-	if ip := net.ParseIP(value); ip != nil {
-		return ip.To4() == nil
-	}
-
-	if ip, _, err := net.ParseCIDR(value); err == nil {
-		return ip.To4() == nil
-	}
-
-	return false
 }

@@ -44,8 +44,9 @@ func TestRenderRuleset_WithWhitelistSnapshot_RendersDenyAllWithExplicitAccepts(t
 				"table inet aegis",
 				"policy drop",
 				"ct state established,related accept",
+				"ip daddr @aegis_resolved accept",
 			},
-			wantOmits: []string{"203.0.113.99"},
+			wantOmits: []string{"dport"},
 		},
 	}
 
@@ -105,42 +106,69 @@ func TestRenderRuleset_WithBlacklistSnapshot_RendersAcceptAllWithExplicitDrops(t
 
 func TestRenderRuleset_WithIPRuleFields_RendersProtocolAndPort(t *testing.T) {
 	testCases := map[string]struct {
-		rule         propagation.Rule
+		rules        []propagation.Rule
 		wantContains []string
 		wantOmits    []string
 	}{
 		"tcp rule with port": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.5", Protocol: ptr("TCP"), Port: ptr(22)},
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.5", Protocol: ptr("TCP"), Port: ptr(22)}},
 			wantContains: []string{"ip daddr 10.0.0.5", "tcp dport 22"},
 		},
 		"udp rule with port": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.6", Protocol: ptr("UDP"), Port: ptr(53)},
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.6", Protocol: ptr("UDP"), Port: ptr(53)}},
 			wantContains: []string{"ip daddr 10.0.0.6", "udp dport 53"},
 		},
+		"sctp rule with port": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.4", Protocol: ptr("SCTP"), Port: ptr(80)}},
+			wantContains: []string{"ip daddr 10.0.0.4", "sctp dport 80"},
+		},
+		"dccp rule with port": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.12", Protocol: ptr("DCCP"), Port: ptr(80)}},
+			wantContains: []string{"ip daddr 10.0.0.12", "dccp dport 80"},
+		},
 		"rule without protocol or port": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.9"},
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.9"}},
 			wantContains: []string{"ip daddr 10.0.0.9"},
 			wantOmits:    []string{"dport", "l4proto"},
 		},
-		"ipv4 cidr value renders verbatim": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.0/8"},
-			wantContains: []string{"ip daddr 10.0.0.0/8"},
-		},
-		"ipv6 address value renders verbatim": {
-			rule:         propagation.Rule{Type: "IP", Value: "2001:db8::1"},
-			wantContains: []string{"2001:db8::1"},
-		},
-		"ipv6 cidr value renders verbatim": {
-			rule:         propagation.Rule{Type: "IP", Value: "2001:db8::/32"},
-			wantContains: []string{"2001:db8::/32"},
-		},
 		"rule with protocol only": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.7", Protocol: ptr("TCP")},
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.7", Protocol: ptr("TCP")}},
 			wantContains: []string{"ip daddr 10.0.0.7", "meta l4proto tcp"},
 		},
-		"rule with port only": {
-			rule:         propagation.Rule{Type: "IP", Value: "10.0.0.8", Port: ptr(53)},
-			wantContains: []string{"ip daddr 10.0.0.8", "tcp dport 53", "udp dport 53"},
+		"icmp rule with port is skipped while others still render": {
+			rules: []propagation.Rule{
+				{Type: "IP", Value: "10.0.0.5", Protocol: ptr("ICMP"), Port: ptr(5)},
+				{Type: "IP", Value: "10.0.0.6", Protocol: ptr("TCP"), Port: ptr(22)},
+			},
+			wantContains: []string{"ip daddr 10.0.0.6", "tcp dport 22"},
+			wantOmits:    []string{"10.0.0.5", "icmp"},
+		},
+		"unknown protocol without port is skipped": {
+			rules:     []propagation.Rule{{Type: "IP", Value: "10.0.0.3", Protocol: ptr("HTTP")}},
+			wantOmits: []string{"10.0.0.3", "http", "l4proto"},
+		},
+		"port without protocol is skipped": {
+			rules:     []propagation.Rule{{Type: "IP", Value: "10.0.0.8", Port: ptr(53)}},
+			wantOmits: []string{"10.0.0.8", "dport"},
+		},
+		"ipv4 cidr value renders verbatim": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "10.0.0.0/8"}},
+			wantContains: []string{"ip daddr 10.0.0.0/8"},
+		},
+		"ipv6 address renders on the ip6 family": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "2001:db8::1"}},
+			wantContains: []string{"ip6 daddr 2001:db8::1"},
+			wantOmits:    []string{"ip daddr 2001:db8::1"},
+		},
+		"ipv6 cidr renders on the ip6 family": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "2001:db8::/32"}},
+			wantContains: []string{"ip6 daddr 2001:db8::/32"},
+			wantOmits:    []string{"ip daddr 2001:db8::/32"},
+		},
+		"ipv4-mapped ipv6 cidr renders on the ip6 family": {
+			rules:        []propagation.Rule{{Type: "IP", Value: "::ffff:10.0.0.1/128"}},
+			wantContains: []string{"ip6 daddr ::ffff:10.0.0.1/128"},
+			wantOmits:    []string{"ip daddr ::ffff:10.0.0.1/128"},
 		},
 	}
 
@@ -148,7 +176,7 @@ func TestRenderRuleset_WithIPRuleFields_RendersProtocolAndPort(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			snapshot := filtering.PolicySnapshot{
 				PolicyType: propagation.PolicyTypeWhitelist,
-				Rules:      []propagation.Rule{tc.rule},
+				Rules:      tc.rules,
 			}
 
 			rendered := nftables.RenderRuleset(snapshot)
