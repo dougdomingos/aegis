@@ -1,6 +1,7 @@
 package nftables
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"os/exec"
@@ -35,12 +36,12 @@ func NewExecutor(binaryPath string) *Executor {
 
 // Apply replaces the Aegis ruleset with the rendered policy snapshot.
 func (e *Executor) Apply(snapshot filtering.PolicySnapshot) error {
-	return e.execute([]string{"-f"}, RenderRuleset(snapshot))
+	return e.execute([]string{"-f", "-"}, RenderRuleset(snapshot))
 }
 
 // Clear removes the Aegis nftables table.
 func (e *Executor) Clear() error {
-	return e.execute([]string{"-f"}, RenderClear())
+	return e.execute([]string{"-f", "-"}, RenderClear())
 }
 
 // AddResolvedIP adds a validated DNS answer address to its address-family set.
@@ -62,7 +63,7 @@ func (e *Executor) AddResolvedIP(ip string) error {
 func (e *Executor) execute(args []string, stdin string) error {
 	if err := e.run(e.binaryPath, args, stdin); err != nil {
 		command := strings.Join(append([]string{e.binaryPath}, args...), " ")
-		return fmt.Errorf("execute nft command %q: %w", command, err)
+		return fmt.Errorf("execute %s command %q: %w", e.binaryPath, command, err)
 	}
 
 	return nil
@@ -73,5 +74,16 @@ func runNftCommand(binary string, args []string, stdin string) error {
 	cmd := exec.Command(binary, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 
-	return cmd.Run()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if message := strings.TrimSpace(stderr.String()); message != "" {
+			return fmt.Errorf("%w: %s", err, message)
+		}
+
+		return err
+	}
+
+	return nil
 }

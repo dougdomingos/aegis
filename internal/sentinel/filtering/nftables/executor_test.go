@@ -2,6 +2,8 @@ package nftables_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -29,7 +31,7 @@ func TestExecutor_Apply_WithSnapshot_RunsRenderedRuleset(t *testing.T) {
 		t.Errorf("Apply() binary = %q, want %q", invocation.binary, "/usr/sbin/nft")
 	}
 
-	wantArgs := []string{"-f"}
+	wantArgs := []string{"-f", "-"}
 	if !reflect.DeepEqual(invocation.args, wantArgs) {
 		t.Errorf("Apply() args = %v, want %v", invocation.args, wantArgs)
 	}
@@ -58,6 +60,74 @@ func TestExecutor_Apply_WithEmptyBinaryPath_DefaultsToNft(t *testing.T) {
 	}
 }
 
+func TestExecutor_Apply_WithRealRunner_DeliversArgumentsAndStdin(t *testing.T) {
+	// Arrange
+	snapshot := filtering.PolicySnapshot{PolicyType: propagation.PolicyTypeBlacklist}
+	scriptPath := writeExecutableScript(t, `#!/bin/sh
+dir=${0%/*}
+printf '%s' "$*" > "$dir/args"
+cat > "$dir/stdin"
+`)
+	executor := nftables.NewExecutor(scriptPath)
+
+	// Act
+	err := executor.Apply(snapshot)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Apply() error = %v, want nil", err)
+	}
+
+	recordedArgs, err := os.ReadFile(filepath.Join(filepath.Dir(scriptPath), "args"))
+	if err != nil {
+		t.Fatalf("read recorded args: %v", err)
+	}
+
+	if string(recordedArgs) != "-f -" {
+		t.Errorf("Apply() real runner args = %q, want %q", recordedArgs, "-f -")
+	}
+
+	recordedStdin, err := os.ReadFile(filepath.Join(filepath.Dir(scriptPath), "stdin"))
+	if err != nil {
+		t.Fatalf("read recorded stdin: %v", err)
+	}
+
+	wantStdin := nftables.RenderRuleset(snapshot)
+	if string(recordedStdin) != wantStdin {
+		t.Errorf("Apply() real runner stdin = %q, want rendered ruleset %q", recordedStdin, wantStdin)
+	}
+}
+
+func TestExecutor_Apply_WithRealRunnerStderr_ReturnsDiagnosticError(t *testing.T) {
+	// Arrange
+	scriptPath := writeExecutableScript(t, `#!/bin/sh
+printf 'nft syntax error\n' >&2
+exit 1
+`)
+	executor := nftables.NewExecutor(scriptPath)
+
+	// Act
+	err := executor.Apply(filtering.PolicySnapshot{})
+
+	// Assert
+	if err == nil {
+		t.Fatal("Apply() error = nil, want real process failure")
+	}
+
+	wantCommandContext := "execute " + scriptPath + " command"
+	if !strings.Contains(err.Error(), wantCommandContext) {
+		t.Errorf("Apply() error = %q, want configured binary context %q", err, wantCommandContext)
+	}
+
+	if !strings.Contains(err.Error(), "exit status 1") {
+		t.Errorf("Apply() error = %q, want wrapped process exit status", err)
+	}
+
+	if !strings.HasSuffix(err.Error(), ": nft syntax error") {
+		t.Errorf("Apply() error = %q, want trimmed stderr suffix %q", err, ": nft syntax error")
+	}
+}
+
 func TestExecutor_Apply_WithRunnerError_ReturnsWrappedCommandError(t *testing.T) {
 	// Arrange
 	runnerErr := errors.New("runner failed")
@@ -68,7 +138,7 @@ func TestExecutor_Apply_WithRunnerError_ReturnsWrappedCommandError(t *testing.T)
 
 	// Assert
 	assertSingleInvocation(t, recorder)
-	assertWrappedCommandError(t, err, runnerErr, "nft-test -f")
+	assertWrappedCommandError(t, err, runnerErr, "nft-test -f -")
 }
 
 func TestExecutor_Clear_WithRenderedClear_RunsTableDeletion(t *testing.T) {
@@ -84,7 +154,7 @@ func TestExecutor_Clear_WithRenderedClear_RunsTableDeletion(t *testing.T) {
 	}
 
 	invocation := assertSingleInvocation(t, recorder)
-	wantArgs := []string{"-f"}
+	wantArgs := []string{"-f", "-"}
 	if !reflect.DeepEqual(invocation.args, wantArgs) {
 		t.Errorf("Clear() args = %v, want %v", invocation.args, wantArgs)
 	}
@@ -105,7 +175,7 @@ func TestExecutor_Clear_WithRunnerError_ReturnsWrappedCommandError(t *testing.T)
 
 	// Assert
 	assertSingleInvocation(t, recorder)
-	assertWrappedCommandError(t, err, runnerErr, "nft-test -f")
+	assertWrappedCommandError(t, err, runnerErr, "nft-test -f -")
 }
 
 func TestExecutor_AddResolvedIP_WithValidAddress_UsesAddressFamilySet(t *testing.T) {
@@ -244,6 +314,22 @@ func assertSingleInvocation(t *testing.T, recorder *commandRecorder) commandInvo
 	}
 
 	return recorder.calls[0]
+}
+
+// writeExecutableScript writes an executable shell script in a temporary directory.
+func writeExecutableScript(t *testing.T, content string) string {
+	t.Helper()
+
+	scriptPath := filepath.Join(t.TempDir(), "fake-nft")
+	if err := os.WriteFile(scriptPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write executable script: %v", err)
+	}
+
+	if err := os.Chmod(scriptPath, 0o755); err != nil {
+		t.Fatalf("chmod executable script: %v", err)
+	}
+
+	return scriptPath
 }
 
 // assertWrappedCommandError requires the runner error and command context.
