@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package containers
 
 import (
 	"bytes"
@@ -97,8 +97,8 @@ func TestMain(m *testing.M) {
 
 	ref, err := provider.BuildImage(context.Background(), &testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{
-			Context:    "..",
-			Dockerfile: "e2e/Dockerfile",
+			Context:    "../..",
+			Dockerfile: "e2e/containers/Dockerfile",
 			Repo:       imageRepo,
 			Tag:        imageTag,
 			KeepImage:  true,

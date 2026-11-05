@@ -30,12 +30,12 @@
 ### Task 1: VM lifecycle
 
 **Files:**
-- Create: `vm/scripts/lib.sh`, `build-base.sh`, `up.sh`, `down.sh`, `clean.sh`
-- Create: `vm/templates/network.xml`, `vm/templates/cloud-init/{base,node}.yaml`
-- Modify: `Makefile`, `.gitignore` (add `vm/.state/`)
+- Create: `e2e/vm/scripts/lib.sh`, `build-base.sh`, `up.sh`, `down.sh`, `clean.sh`
+- Create: `e2e/vm/templates/network.xml`, `e2e/vm/templates/cloud-init/{base,node}.yaml`
+- Modify: `Makefile`, `.gitignore` (add `e2e/vm/.state/`)
 
 **Interfaces:**
-- Produces: `make vm-up`, `vm-down`, `vm-clean`; SSH access as `aegis` (passwordless sudo) with the key `vm/.state/id_ed25519` on all VMs.
+- Produces: `make vm-up`, `vm-down`, `vm-clean`; SSH access as `aegis` (passwordless sudo) with the key `e2e/vm/.state/id_ed25519` on all VMs.
 
 - [ ] **Step 1:** Write `build-base.sh`: download the Ubuntu 24.04 cloud image, boot a builder on QEMU user networking with `base.yaml` (installs nftables, curl, dnsmasq, python3, dnsutils), wait for shutdown, keep the volume `aegis-base.qcow2`. Skip if it already exists.
 - [ ] **Step 2:** Write `up.sh`: run `down.sh` first so reruns are clean, generate the SSH key, define the isolated network (no `<forward>`), create overlays and start the three VMs with static IPs through cloud-init `network-config`, wait for SSH.
@@ -46,14 +46,14 @@
 ### Task 2: Deploy services
 
 **Files:**
-- Create: `vm/scripts/deploy.sh`, `vm/templates/aegis-orchestrator.service`, `aegis-sentinel.service`, `aegis-http@.service`, `dnsmasq.conf`, `sentinel.config.json`, `machines.csv`
-- Modify: `vm/scripts/up.sh` (call `deploy.sh` last)
+- Create: `e2e/vm/scripts/deploy.sh`, `e2e/vm/templates/aegis-orchestrator.service`, `aegis-sentinel.service`, `aegis-http@.service`, `dnsmasq.conf`, `sentinel.config.json`, `machines.csv`
+- Modify: `e2e/vm/scripts/up.sh` (call `deploy.sh` last)
 
 **Interfaces:**
 - Consumes: Task 1 SSH access.
 - Produces: Orchestrator API at `http://192.168.150.10:8080`; Sentinel running; `student` user on the Sentinel; targets on .31 and .32.
 
-- [ ] **Step 1:** Write `deploy.sh`: build both binaries, generate lab key and session secret into `vm/.state/`, copy binaries and configs by scp, enable the units. Orchestrator env: `AEGIS_LAB_KEY`, `AEGIS_SESSION_SECRET`, `AEGIS_MACHINES`, `AEGIS_DB`, `AEGIS_GRPC_ADDR=:9090`.
+- [ ] **Step 1:** Write `deploy.sh`: build both binaries, generate lab key and session secret into `e2e/vm/.state/`, copy binaries and configs by scp, enable the units. Orchestrator env: `AEGIS_LAB_KEY`, `AEGIS_SESSION_SECRET`, `AEGIS_MACHINES`, `AEGIS_DB`, `AEGIS_GRPC_ADDR=:9090`.
 - [ ] **Step 2:** Write the Sentinel config: `dns_upstream_servers: ["192.168.150.30"]`, `propagation_address: "192.168.150.10:9090"`, and a heartbeat of `5s`. Set `/etc/resolv.conf` to `nameserver 127.0.0.1`. The unit uses `Restart=on-failure`, `RestartSec=2`, `After=network-online.target`.
 - [ ] **Step 3:** Verify. Run `make vm-up`, then `curl -s http://192.168.150.10:8080/machines`. Expected: the Sentinel is listed as CONNECTED.
 - [ ] **Step 4:** Verify. As `student` on the Sentinel, run `curl -s --max-time 5 allowed.test` and `curl -s --max-time 5 blocked.test`. Expected: both exit 0.
@@ -61,10 +61,10 @@
 ### Task 3: Test harness
 
 **Files:**
-- Create: `vm/harness_test.go` (package `vm`, `//go:build vm`)
+- Create: `e2e/vm/harness_test.go` (package `vm`, `//go:build vm`)
 
 **Interfaces:**
-- Consumes: `vm/.state/id_ed25519`; API routes as used by `e2e/harness_test.go`.
+- Consumes: `e2e/vm/.state/id_ed25519`; API routes as used by `e2e/containers/harness_test.go`.
 - Produces:
   - `newLab(t *testing.T) *lab`
   - `(*lab) curlAsStudent(t, target string) int`: returns the curl exit code
@@ -72,16 +72,16 @@
   - `(*lab) applyPolicy(t, policyType, ruleType, value string) int64`: creates the policy and group, links them, waits for ACK, registers cleanup, returns the ACKed sequence
   - `(*lab) revoke(t)`, `(*lab) reboot(t)`, `(*lab) waitConnected(t)`
 
-- [ ] **Step 1:** Write `TestMain` so it exits non-zero with `run "make vm-up" first` when `/machines` is unreachable within 3s. Verify: with no VMs, `go test -tags vm ./vm/...` prints that message immediately.
-- [ ] **Step 2:** Implement the API helpers, porting `doJSON`, `createPolicy`, `createGroup`, `linkMachine`, `linkPolicy`, `unlinkPolicy`, `waitForPropagation` and `machineByIP` from `e2e/harness_test.go` and `createIPRule` from `e2e/filtering_e2e_test.go`. They live in another package's test files and cannot be imported.
+- [ ] **Step 1:** Write `TestMain` so it exits non-zero with `run "make vm-up" first` when `/machines` is unreachable within 3s. Verify: with no VMs, `go test -tags vm ./e2e/vm/...` prints that message immediately.
+- [ ] **Step 2:** Implement the API helpers, porting `doJSON`, `createPolicy`, `createGroup`, `linkMachine`, `linkPolicy`, `unlinkPolicy`, `waitForPropagation` and `machineByIP` from `e2e/containers/harness_test.go` and `createIPRule` from `e2e/containers/filtering_e2e_test.go`. They live in another package's test files and cannot be imported.
 - [ ] **Step 3:** Implement the SSH helpers with `os/exec` and `ssh -i ... -o StrictHostKeyChecking=no`. `curlAsStudent` runs `sudo -u student curl -s -o /dev/null --max-time 5 <target>`. `reboot` uses `virsh reboot aegis-sentinel`, then waits for SSH and `waitConnected`.
 - [ ] **Step 4:** Implement `t.Cleanup` in `applyPolicy`: unlink if still linked, delete the group and policy, wait until `inet aegis` is absent.
 
 ### Task 4: Filtering matrix
 
 **Files:**
-- Create: `vm/filtering_vm_test.go` (`//go:build vm`)
-- Modify: `Makefile` (`vm-test`: `go test -tags vm -count=1 -timeout 30m -v ./vm/...`), `README.md`
+- Create: `e2e/vm/filtering_vm_test.go` (`//go:build vm`)
+- Modify: `Makefile` (`vm-test`: `go test -tags vm -count=1 -timeout 30m -v ./e2e/vm/...`), `README.md`
 
 **Interfaces:**
 - Consumes: Task 3 helpers.

@@ -57,7 +57,7 @@ policies, each with domain and IP rules. It also covers revoking a policy and
 rebooting a Sentinel. It runs locally and manually, not in CI.
 
 Prerequisites: a running `libvirtd`, membership in the `kvm` and `libvirt`
-groups, `virt-install`, `genisoimage` or `xorriso`, `openssl`, and about 5 GB of
+groups, `virt-install`, `genisoimage` or `xorriso`, `openssl`, `curl`, and about 6 GB of
 free disk space. The test network uses `192.168.150.0/24`, which must be free.
 
 ```bash
@@ -66,6 +66,10 @@ make vm-test   # run the suite against the lab
 make vm-down   # remove VMs, network and local state, keeping the base image
 make vm-clean  # also remove the base image and the storage pool
 ```
+
+The suite also loads the test pages in headless Chrome as the unprivileged user.
+One of those tests records a known gap: a browser using its own DNS over HTTPS
+bypasses a BLACKLIST domain rule (issue #27). It shows as skipped until fixed.
 
 `make vm-test` refuses to run if the code changed since `make vm-up`, because the
 lab would be testing old binaries. Run `make vm-up` again to redeploy.

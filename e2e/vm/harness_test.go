@@ -41,6 +41,9 @@ const (
 	// rebootTimeout caps the wait for a rebooted VM to recover.
 	rebootTimeout = 3 * time.Minute
 
+	// targetMarker is the text of the page both HTTP targets serve.
+	targetMarker = "aegis-target"
+
 	// pollInterval is the pause between polls of a condition.
 	pollInterval = 500 * time.Millisecond
 )
@@ -163,6 +166,35 @@ func (l *lab) reboot(t *testing.T, afterSequence int64) int64 {
 
 		time.Sleep(pollInterval)
 	}
+}
+
+// browseAsStudent loads url in headless Chrome as the unprivileged user and
+// reports whether the target page's body arrived. A failed load dumps Chrome's
+// error page instead, which lacks the marker.
+func (l *lab) browseAsStudent(t *testing.T, url string) bool {
+	t.Helper()
+
+	// The sandbox is off because Ubuntu restricts the user namespaces it needs;
+	// the profile is throwaway so no state leaks between loads.
+	_, out := l.sudo(t, "sudo -u student -H timeout 30 google-chrome --headless=new --no-sandbox "+
+		"--disable-gpu --disable-background-networking --user-data-dir=/tmp/chrome-profile-$$ "+
+		"--dump-dom "+url+" 2>/dev/null; rm -rf /tmp/chrome-profile-$$")
+
+	return strings.Contains(out, targetMarker)
+}
+
+// enableChromeDoH makes Chrome resolve names only through the lab's
+// DNS-over-HTTPS server and removes the setting when the test ends.
+func (l *lab) enableChromeDoH(t *testing.T) {
+	t.Helper()
+
+	const policyDir = "/etc/opt/chrome/policies/managed"
+
+	if code, out := l.sudo(t, "mkdir -p "+policyDir+" && cp /etc/aegis/chrome-doh-policy.json "+policyDir+"/"); code != 0 {
+		t.Fatalf("failed to install the Chrome DoH policy: exit %d; output: %s", code, out)
+	}
+
+	t.Cleanup(func() { l.sudo(t, "rm -f "+policyDir+"/chrome-doh-policy.json") })
 }
 
 // waitConnected waits until the Orchestrator reports the Sentinel CONNECTED.
