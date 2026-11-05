@@ -63,7 +63,15 @@ func run() int {
 	defer stop()
 
 	detector := identity.NewDetector()
-	orchestrator, err := client.New(cfg.OrchestratorURL, cfg.PropagationAddress, cfg.LabKey, cfg.RequestTimeout, logger)
+	// The system resolver may point at the embedded DNS server, which is not
+	// serving yet when the Sentinel authenticates, so the Orchestrator is
+	// resolved through the first upstream DNS server.
+	dnsServer := ""
+	if len(cfg.DNSUpstreamServers) > 0 {
+		dnsServer = cfg.DNSUpstreamServers[0]
+	}
+
+	orchestrator, err := client.New(cfg.OrchestratorURL, cfg.PropagationAddress, cfg.LabKey, cfg.RequestTimeout, hostresolve.Resolver(dnsServer), logger)
 	if err != nil {
 		logger.Error("failed to initialize client", "error", err)
 

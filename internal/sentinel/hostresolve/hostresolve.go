@@ -16,15 +16,7 @@ import (
 // lookup is bounded by timeout. Hosts that fail to resolve are logged and
 // skipped.
 func IPs(hosts []string, dnsServer string, timeout time.Duration, logger *slog.Logger) []string {
-	resolver := net.DefaultResolver
-	if dnsServer != "" {
-		resolver = &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				return (&net.Dialer{}).DialContext(ctx, network, withPort(dnsServer))
-			},
-		}
-	}
+	resolver := Resolver(dnsServer)
 
 	var ips []string
 
@@ -52,6 +44,22 @@ func IPs(hosts []string, dnsServer string, timeout time.Duration, logger *slog.L
 	}
 
 	return ips
+}
+
+// Resolver returns a resolver that sends every lookup to dnsServer (a host or
+// host:port, port 53 by default) through the pure Go resolver. An empty
+// dnsServer returns the system resolver.
+func Resolver(dnsServer string) *net.Resolver {
+	if dnsServer == "" {
+		return net.DefaultResolver
+	}
+
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, withPort(dnsServer))
+		},
+	}
 }
 
 // withPort appends port 53 to a DNS server address that has no port.

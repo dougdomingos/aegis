@@ -18,10 +18,12 @@ import (
 	sentinelErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/common/propagation"
 	"dougdomingos.com/aegis/internal/sentinel/client"
+	"dougdomingos.com/aegis/internal/sentinel/hostresolve"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/pkg/pb"
 
 	"dougdomingos.com/aegis/internal/common/auth"
+	"github.com/miekg/dns"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -316,7 +318,7 @@ func TestClient_New_WithInvalidPropagationAddress_ReturnsError(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), tc.address, labKey, time.Second, nil)
+			_, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), tc.address, labKey, time.Second, nil, nil)
 			if err == nil {
 				t.Errorf("expected an error for propagation address %q, got nil", tc.address)
 			}
@@ -489,10 +491,65 @@ func TestClient_ConnectPropagation_WhenAckSent_ConvertsStatus(t *testing.T) {
 	}
 }
 
+func TestClient_Heartbeat_WithInjectedResolver_ResolvesHostnameThroughIt(t *testing.T) {
+	// Arrange
+	dnsAddress := startFakeDNS(t, "orchestrator.test.", "127.0.0.1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+
+	cl, err := client.New(mustParseURL(t, "http://orchestrator.test:"+port), "127.0.0.1:1", labKey,
+		2*time.Second, hostresolve.Resolver(dnsAddress), nil)
+	if err != nil {
+		t.Fatalf("client.New() error = %v, want nil", err)
+	}
+
+	t.Cleanup(func() { _ = cl.Close() })
+
+	// Act
+	err = cl.Heartbeat(t.Context(), "session-token")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("client.Heartbeat() error = %v, want nil", err)
+	}
+}
+
+func TestClient_ConnectPropagation_WithInjectedResolver_ResolvesHostnameThroughIt(t *testing.T) {
+	// Arrange
+	dnsAddress := startFakeDNS(t, "orchestrator.test.", "127.0.0.1")
+	fake, address := startPropagationFake(t)
+	_, port, _ := net.SplitHostPort(address)
+
+	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), "orchestrator.test:"+port, labKey,
+		2*time.Second, hostresolve.Resolver(dnsAddress), nil)
+	if err != nil {
+		t.Fatalf("client.New() error = %v, want nil", err)
+	}
+
+	t.Cleanup(func() { _ = cl.Close() })
+
+	// Act
+	stream, err := cl.ConnectPropagation(t.Context(), "token-abc")
+	if err != nil {
+		t.Fatalf("client.ConnectPropagation() error = %v, want nil", err)
+	}
+	defer func() { _ = stream.CloseSend() }()
+
+	// Assert
+	if got := waitForString(t, fake.authorization, "authorization metadata"); got != "Bearer token-abc" {
+		t.Errorf("authorization = %q, want %q", got, "Bearer token-abc")
+	}
+}
+
 func TestClient_Close_ClosesConnection(t *testing.T) {
 	_, address := startPropagationFake(t)
 
-	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, 2*time.Second, nil)
+	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, 2*time.Second, nil, nil)
 	if err != nil {
 		t.Fatalf("client.New() error = %v, want nil", err)
 	}
@@ -590,7 +647,7 @@ func startPropagationFake(t *testing.T) (*propagationFake, string) {
 func newTestClientAtPropagation(t *testing.T, address string, timeout time.Duration) *client.Client {
 	t.Helper()
 
-	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, timeout, nil)
+	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, timeout, nil, nil)
 	if err != nil {
 		t.Fatalf("client.New() error = %v, want nil", err)
 	}
@@ -633,7 +690,7 @@ func waitForAck(t *testing.T, channel chan *pb.Ack, what string) *pb.Ack {
 func newTestClient(t *testing.T, serverURL string, timeout time.Duration) *client.Client {
 	t.Helper()
 
-	cl, err := client.New(mustParseURL(t, serverURL), "127.0.0.1:1", labKey, timeout, nil)
+	cl, err := client.New(mustParseURL(t, serverURL), "127.0.0.1:1", labKey, timeout, nil, nil)
 	if err != nil {
 		t.Fatalf("client.New() error = %v, want nil", err)
 	}
@@ -653,4 +710,35 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	}
 
 	return parsed
+}
+
+// startFakeDNS serves a UDP DNS server on a loopback port that answers every
+// A query with ip for the given fully qualified name, and returns its address.
+func startFakeDNS(t *testing.T, name, ip string) string {
+	t.Helper()
+
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen for fake DNS: %v", err)
+	}
+
+	server := &dns.Server{PacketConn: conn, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, req *dns.Msg) {
+		reply := new(dns.Msg)
+		reply.SetReply(req)
+
+		if req.Question[0].Name == name && req.Question[0].Qtype == dns.TypeA {
+			reply.Answer = append(reply.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   net.ParseIP(ip),
+			})
+		}
+
+		_ = w.WriteMsg(reply)
+	})}
+
+	go func() { _ = server.ActivateAndServe() }()
+
+	t.Cleanup(func() { _ = server.Shutdown() })
+
+	return conn.LocalAddr().String()
 }
