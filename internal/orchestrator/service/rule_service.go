@@ -136,7 +136,8 @@ func (service *RuleService) UpdateRule(ctx context.Context, p schemas.UpdateRule
 }
 
 // RemoveRule deletes a rule owned by the referenced policy. If no rule
-// matches the requested ID within that policy, it returns an error.
+// matches the requested ID within that policy, it returns an error. The last
+// rule of a policy linked to a group cannot be removed.
 func (service *RuleService) RemoveRule(ctx context.Context, p schemas.RemoveRuleSchema) error {
 	rule, err := service.getRuleFromPolicy(ctx, p.PolicyID, int64(p.ID))
 	if err != nil {
@@ -154,7 +155,7 @@ func (service *RuleService) RemoveRule(ctx context.Context, p schemas.RemoveRule
 			return err
 		}
 		if ruleCount <= 1 {
-			return errors.ErrPolicyHasNoRules
+			return errors.ErrLinkedPolicyLastRule
 		}
 	}
 

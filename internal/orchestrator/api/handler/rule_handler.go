@@ -185,8 +185,8 @@ func (handler *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		utils.MapByError(w, err, map[error]int{
-			errors.ErrRuleNotFound:     http.StatusNotFound,
-			errors.ErrPolicyHasNoRules: http.StatusConflict,
+			errors.ErrRuleNotFound:         http.StatusNotFound,
+			errors.ErrLinkedPolicyLastRule: http.StatusConflict,
 		})
 
 		return

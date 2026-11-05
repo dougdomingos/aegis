@@ -736,7 +736,7 @@ func TestRuleService_RemoveRule_WithRuleOfAnotherPolicy_RejectsRemoval(t *testin
 	}
 }
 
-func TestRuleService_RemoveRule_LastRuleOfLinkedPolicy_ReturnsErrPolicyHasNoRules(t *testing.T) {
+func TestRuleService_RemoveRule_LastRuleOfLinkedPolicy_ReturnsErrLinkedPolicyLastRule(t *testing.T) {
 	ctx, env, service := arrangeRuleServiceTest(t)
 	seededRule := seedRule(t, ctx, env.rules,
 		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
@@ -744,8 +744,8 @@ func TestRuleService_RemoveRule_LastRuleOfLinkedPolicy_ReturnsErrPolicyHasNoRule
 
 	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
 
-	if !errors.Is(err, ruleErrors.ErrPolicyHasNoRules) {
-		t.Errorf("expected error %q, got %q", ruleErrors.ErrPolicyHasNoRules, err)
+	if !errors.Is(err, ruleErrors.ErrLinkedPolicyLastRule) {
+		t.Errorf("expected error %q, got %q", ruleErrors.ErrLinkedPolicyLastRule, err)
 	}
 
 	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule == nil {

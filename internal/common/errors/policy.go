@@ -23,7 +23,12 @@ var (
 	// supported one (WHITELIST or BLACKLIST).
 	ErrInvalidPolicyType = errors.New("policy type must be WHITELIST or BLACKLIST")
 
-	// ErrPolicyHasNoRules is returned when an operation would leave a linked
-	// policy without rules, or would link a policy that has no rules.
+	// ErrPolicyHasNoRules is returned when a policy without rules is linked
+	// to a group.
 	ErrPolicyHasNoRules = errors.New("policy must have at least one rule to be linked")
+
+	// ErrLinkedPolicyLastRule is returned when the last rule of a policy that
+	// is linked to a group would be removed, leaving the group without
+	// enforceable rules.
+	ErrLinkedPolicyLastRule = errors.New("cannot remove the last rule of a policy linked to a group")
 )

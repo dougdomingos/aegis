@@ -363,7 +363,7 @@ func TestRuleHandler_Delete_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
 func TestRuleHandler_Delete_LastRuleOfLinkedPolicy_ReturnsStatus409(t *testing.T) {
 	mock := &mockRuleService{
 		removeFn: func(_ context.Context, _ schemas.RemoveRuleSchema) error {
-			return ruleErrors.ErrPolicyHasNoRules
+			return ruleErrors.ErrLinkedPolicyLastRule
 		},
 	}
 

@@ -52,7 +52,7 @@ behavior (US02, US03 and US08) and should be reviewed on its own.
 | Remove | The bump uses `WHERE id = (SELECT policy_id FROM rules WHERE id = ?)` before the delete, in the same transaction | `Remove` receives only the rule ID, and the rule must still exist when the policy is resolved. If the rule does not exist the subquery is `NULL`, nothing changes, and the removal fails with the existing error. |
 | No-op update | The service skips the store call when the patched rule equals the stored one (`Rule.IsEqual`) | Mirrors the policy rename no-op, which keeps the version unchanged. |
 | Empty-link guard | `GroupService.LinkPolicy` rejects a policy whose `CountByPolicy` is `0` with `ErrPolicyHasNoRules` | The check belongs in the service, next to the existing policy lookup. |
-| Last-rule guard | `RuleService.RemoveRule` rejects removing a rule when `CountByPolicy` is `1` and the policy is linked | Unlinked policies may be emptied freely. Only linked policies need rules for propagation. |
+| Last-rule guard | `RuleService.RemoveRule` rejects removing a rule when `CountByPolicy` is `1` and the policy is linked, with `ErrLinkedPolicyLastRule` (a distinct error, so the 409 message states the real reason instead of the link-guard wording) | Unlinked policies may be emptied freely. Only linked policies need rules for propagation. |
 | Linked check | New `GroupStore.IsPolicyLinked(ctx, policyID) (bool, error)` | `RuleService` needs a read-only answer and must not depend on the group's full entity. |
 | Status code | `409 Conflict` | Same convention as the existing duplicate-name conflicts. The request is well formed; its effect conflicts with the current state. |
 
@@ -79,6 +79,8 @@ No migration is needed. The `version` and `updated_at` columns already exist.
 - `RuleService` gains a `domain.GroupStore` dependency (for `IsPolicyLinked`).
 - `GroupService` gains a `domain.RuleStore` dependency (for `CountByPolicy`).
 - `errors.ErrPolicyHasNoRules` is added to `internal/common/errors/policy.go`.
+- `errors.ErrLinkedPolicyLastRule` (same file) is returned by the last-rule
+  guard, so its message describes the removal being refused.
 - `RuleService.UpdateRule` returns the stored rule unchanged when the patch
   produces an equal rule.
 - `RuleService.RemoveRule` checks the guard before calling the store.
@@ -93,7 +95,7 @@ path (for example, the policy is removed) is not handled here; that is US09.
 ## 6. Handler Changes
 
 - `GroupHandler.LinkPolicy` maps `ErrPolicyHasNoRules` to `409`.
-- `RuleHandler.RemoveRule` maps `ErrPolicyHasNoRules` to `409`.
+- `RuleHandler.RemoveRule` maps `ErrLinkedPolicyLastRule` to `409`.
 - `router.go` passes the new dependencies to `NewGroupService` and
   `NewRuleService`.
 
