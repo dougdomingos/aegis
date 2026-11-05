@@ -70,7 +70,8 @@ func run() int {
 		return 1
 	}
 
-	propagationRunner := sentinelPropagation.New(stateStore, orchestrator, orchestrator, logger)
+	// TODO(task 8): wire the real filter and essentials; a nil filter rejects every message.
+	propagationRunner := sentinelPropagation.New(stateStore, orchestrator, orchestrator, nil, sentinelPropagation.Essentials{}, logger)
 
 	heartbeats := heartbeat.New(cfg.HeartbeatInterval, orchestrator, orchestrator, logger)
 
