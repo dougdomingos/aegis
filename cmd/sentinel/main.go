@@ -18,6 +18,7 @@ import (
 	"dougdomingos.com/aegis/internal/sentinel/heartbeat"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/internal/sentinel/logging"
+	sentinelPropagation "dougdomingos.com/aegis/internal/sentinel/propagation"
 )
 
 // secondSignalGrace is the grace window given to a second termination signal
@@ -62,17 +63,28 @@ func run() int {
 
 	defer orchestrator.Close()
 
+	stateStore, err := sentinelPropagation.NewFileStore(cfg.RulesStatePath)
+	if err != nil {
+		logger.Error("failed to initialize propagation state store", "error", err)
+
+		return 1
+	}
+
+	propagationRunner := sentinelPropagation.New(stateStore, orchestrator, orchestrator, logger)
+
 	heartbeats := heartbeat.New(cfg.HeartbeatInterval, orchestrator, orchestrator, logger)
 
 	logger.Info("configuration loaded",
 		"orchestrator_url", cfg.OrchestratorURL.String(),
+		"propagation_address", cfg.PropagationAddress,
+		"rules_state_path", cfg.RulesStatePath,
 		"request_timeout", cfg.RequestTimeout,
 		"heartbeat_interval", cfg.HeartbeatInterval)
 
-	if err := daemon.New(logger, detector, orchestrator, daemon.Task{
-		Name: "heartbeat",
-		Run:  heartbeats.Run,
-	}).Run(ctx); err != nil {
+	if err := daemon.New(logger, detector, orchestrator,
+		daemon.Task{Name: "heartbeat", Run: heartbeats.Run},
+		daemon.Task{Name: "propagation", Run: propagationRunner.Run},
+	).Run(ctx); err != nil {
 		logger.Error("daemon stopped with a fatal error", "error", err)
 
 		return 1
