@@ -206,6 +206,7 @@ func (handler *GroupHandler) LinkPolicy(w http.ResponseWriter, r *http.Request) 
 			errors.ErrPolicyNameRequired: http.StatusBadRequest,
 			errors.ErrGroupNotFound:      http.StatusNotFound,
 			errors.ErrPolicyNotFound:     http.StatusNotFound,
+			errors.ErrPolicyHasNoRules:   http.StatusConflict,
 		})
 
 		return

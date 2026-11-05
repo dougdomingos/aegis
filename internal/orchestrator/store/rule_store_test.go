@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 
@@ -47,6 +48,30 @@ func TestRuleStore_Create_WithValidData_CreatesRule(t *testing.T) {
 			assertRuleEqual(t, &tt, rule)
 		})
 	}
+}
+
+func TestRuleStore_Create_WithValidData_BumpsPolicyVersion(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	before := backdatePolicy(t, ctx, stores)
+
+	seedRule(t, ctx, stores.rules, domain.NewDomainRule("test.com").WithPolicy(stores.policyID).Build())
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyBumped(t, before, after)
+}
+
+func TestRuleStore_Create_WithInexistentPolicy_LeavesVersionUnchanged(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	before := backdatePolicy(t, ctx, stores)
+
+	_, err := stores.rules.Create(ctx, domain.Rule{PolicyID: 9999, Type: domain.DomainRuleType, Value: "test.com"})
+
+	if err == nil {
+		t.Fatal("expected error for inexistent policy, got nil")
+	}
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyUnchanged(t, before, after)
 }
 
 func TestRuleStore_Create_WithoutPolicy_RejectsCreation(t *testing.T) {
@@ -349,6 +374,38 @@ func TestRuleStore_List_WithEmptyStore_ReturnsEmpty(t *testing.T) {
 }
 
 // ============================================================================
+// CountByPolicy
+// ============================================================================
+
+func TestRuleStore_CountByPolicy_WithSeededRules_ReturnsCount(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	seedRule(t, ctx, stores.rules, domain.NewDomainRule("test.com").WithPolicy(stores.policyID).Build())
+	seedRule(t, ctx, stores.rules, domain.NewIPRule("10.0.0.1").WithPolicy(stores.policyID).Build())
+
+	count, err := stores.rules.CountByPolicy(ctx, stores.policyID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 rules, got %d", count)
+	}
+}
+
+func TestRuleStore_CountByPolicy_WithoutRules_ReturnsZero(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+
+	count, err := stores.rules.CountByPolicy(ctx, stores.policyID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected 0 rules, got %d", count)
+	}
+}
+
+// ============================================================================
 // Update
 // ============================================================================
 
@@ -373,6 +430,36 @@ func TestRuleStore_Update_WithValidData_UpdatesRule(t *testing.T) {
 	storedRule, _ := stores.rules.GetByID(ctx, seededRule.ID)
 
 	assertRuleEqual(t, &updatedRule, storedRule)
+}
+
+func TestRuleStore_Update_WithValidData_BumpsPolicyVersion(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	seededRule := seedRule(t, ctx, stores.rules,
+		domain.NewIPRule("0.0.0.0").WithPolicy(stores.policyID).Build())
+	before := backdatePolicy(t, ctx, stores)
+
+	seededRule.Value = "192.168.0.1"
+	if _, err := stores.rules.Update(ctx, seededRule); err != nil {
+		t.Fatalf("expected no errors, got %v", err)
+	}
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyBumped(t, before, after)
+}
+
+func TestRuleStore_Update_WithInexistentID_LeavesVersionUnchanged(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	seededRule := seedRule(t, ctx, stores.rules,
+		domain.NewDomainRule("test.com").WithPolicy(stores.policyID).Build())
+	before := backdatePolicy(t, ctx, stores)
+
+	seededRule.ID = 9999
+	if _, err := stores.rules.Update(ctx, seededRule); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyUnchanged(t, before, after)
 }
 
 func TestRuleStore_Update_WithEmptyType_ReturnsError(t *testing.T) {
@@ -460,6 +547,34 @@ func TestRuleStore_Remove_WithExistingID_DeletesRule(t *testing.T) {
 	}
 }
 
+func TestRuleStore_Remove_WithExistingID_BumpsPolicyVersion(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	seededRule := seedRule(t, ctx, stores.rules,
+		domain.NewDomainRule("test.com").WithPolicy(stores.policyID).Build())
+	before := backdatePolicy(t, ctx, stores)
+
+	if err := stores.rules.Remove(ctx, seededRule.ID); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyBumped(t, before, after)
+}
+
+func TestRuleStore_Remove_WithInexistentID_LeavesVersionUnchanged(t *testing.T) {
+	ctx, stores := arrangeRuleStoreTest(t)
+	seedRule(t, ctx, stores.rules,
+		domain.NewDomainRule("test.com").WithPolicy(stores.policyID).Build())
+	before := backdatePolicy(t, ctx, stores)
+
+	if err := stores.rules.Remove(ctx, 9999); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	after := getPolicy(t, ctx, stores)
+	assertPolicyUnchanged(t, before, after)
+}
+
 func TestRuleStore_Remove_WithInexistentID_RejectsRemoval(t *testing.T) {
 	ctx, stores := arrangeRuleStoreTest(t)
 
@@ -481,6 +596,7 @@ func TestRuleStore_Remove_WithInexistentID_RejectsRemoval(t *testing.T) {
 // ruleStores bundles the stores and the seeded policy required by rule test
 // scenarios.
 type ruleStores struct {
+	db       *sql.DB
 	rules    *store.RuleStore
 	policies *store.PolicyStore
 	policyID int64
@@ -493,6 +609,7 @@ func arrangeRuleStoreTest(t *testing.T) (context.Context, *ruleStores) {
 
 	ctx, db := arrangeStoreDB(t)
 	stores := &ruleStores{
+		db:       db,
 		rules:    store.NewRuleStore(db),
 		policies: store.NewPolicyStore(db),
 	}
@@ -519,6 +636,60 @@ func seedRule(t *testing.T, ctx context.Context, store *store.RuleStore, rule do
 	}
 
 	return *seededRule
+}
+
+// backdatePolicy moves the default policy's updated_at into the distant past,
+// so that a later bump is observable even at second-level timestamp precision,
+// and returns the policy as stored before the scenario's mutation.
+func backdatePolicy(t *testing.T, ctx context.Context, stores *ruleStores) *domain.Policy {
+	t.Helper()
+
+	if _, err := stores.db.ExecContext(ctx,
+		"UPDATE policies SET updated_at = '2000-01-01 00:00:00' WHERE id = ?", stores.policyID); err != nil {
+		t.Fatalf("failed to backdate policy: %v", err)
+	}
+
+	return getPolicy(t, ctx, stores)
+}
+
+// getPolicy fetches the default policy, failing the test if it is missing.
+func getPolicy(t *testing.T, ctx context.Context, stores *ruleStores) *domain.Policy {
+	t.Helper()
+
+	policy, err := stores.policies.GetByID(ctx, stores.policyID)
+	if err != nil || policy == nil {
+		t.Fatalf("failed to fetch policy %d: %v", stores.policyID, err)
+	}
+
+	return policy
+}
+
+// assertPolicyBumped verifies that the policy version increased by exactly one
+// and that updated_at moved forward.
+func assertPolicyBumped(t *testing.T, before, after *domain.Policy) {
+	t.Helper()
+
+	if after.Version != before.Version+1 {
+		t.Errorf("expected policy version %d, got %d", before.Version+1, after.Version)
+	}
+
+	if !after.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("expected updated_at to change, before %v, after %v", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// assertPolicyUnchanged verifies that neither the policy version nor its
+// updated_at changed.
+func assertPolicyUnchanged(t *testing.T, before, after *domain.Policy) {
+	t.Helper()
+
+	if after.Version != before.Version {
+		t.Errorf("expected policy version %d, got %d", before.Version, after.Version)
+	}
+
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Errorf("expected updated_at %v, got %v", before.UpdatedAt, after.UpdatedAt)
+	}
 }
 
 // assertRuleEqual verifies if two rule instances have the same values for

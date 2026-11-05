@@ -674,7 +674,7 @@ func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T
 func TestMachineService_ListMachines_ConfiguredGraceMarksMachineStaleEarlier(t *testing.T) {
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
-	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
+	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
 
 	ctx := context.Background()
 	if err := svc.SyncMachines(ctx, []domain.Machine{
@@ -710,6 +710,150 @@ func TestMachineService_ListMachines_ConfiguredGraceMarksMachineStaleEarlier(t *
 }
 
 // ============================================================================
+// Propagation status
+// ============================================================================
+
+func TestMachineService_ListMachines_WithLatestPropagation_MergesIntoOutput(t *testing.T) {
+	ctx, mockStore, propStore, svc := arrangeMachinePropagationTest(t)
+	machine := seedMachine(t, ctx, mockStore, "10.0.1.11")
+	seedSentAckedPropagation(t, ctx, propStore, machine.ID)
+
+	listed, err := svc.ListMachines(ctx)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if len(listed) != 1 {
+		t.Fatalf("expected one machine, got %d", len(listed))
+	}
+
+	propagation := listed[0].Propagation
+	if propagation.Sequence != 1 {
+		t.Errorf("Sequence = %d, want 1", propagation.Sequence)
+	}
+	if propagation.Status != "ACKED" {
+		t.Errorf("Status = %q, want %q", propagation.Status, "ACKED")
+	}
+	if propagation.Kind != "PACKAGE" {
+		t.Errorf("Kind = %q, want %q", propagation.Kind, "PACKAGE")
+	}
+	if propagation.PolicyID == nil || *propagation.PolicyID != 7 {
+		t.Errorf("PolicyID = %v, want 7", propagation.PolicyID)
+	}
+	if propagation.PolicyName != "lab-whitelist" {
+		t.Errorf("PolicyName = %q, want %q", propagation.PolicyName, "lab-whitelist")
+	}
+	if propagation.PolicyVersion != 3 {
+		t.Errorf("PolicyVersion = %d, want 3", propagation.PolicyVersion)
+	}
+	if propagation.PolicyType != "WHITELIST" {
+		t.Errorf("PolicyType = %q, want %q", propagation.PolicyType, "WHITELIST")
+	}
+}
+
+func TestMachineService_ListMachines_WithoutPropagationRow_ReportsPending(t *testing.T) {
+	ctx, mockStore, _, svc := arrangeMachinePropagationTest(t)
+	seedMachine(t, ctx, mockStore, "10.0.1.11")
+
+	listed, err := svc.ListMachines(ctx)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	assertPendingPropagation(t, listed[0].Propagation)
+}
+
+func TestMachineService_ListMachines_WhenPropagationStoreFails_ReturnsError(t *testing.T) {
+	ctx, mockStore, propStore, svc := arrangeMachinePropagationTest(t)
+	seedMachine(t, ctx, mockStore, "10.0.1.11")
+	expectedErr := errors.New("propagation store unavailable")
+	propStore.ListLatestErr = expectedErr
+
+	_, err := svc.ListMachines(ctx)
+
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected store error %q, got %q", expectedErr, err)
+	}
+}
+
+func TestMachineService_GetPropagationStatus_WithAckedRow_ReturnsTimestampsAndDuration(t *testing.T) {
+	ctx, mockStore, propStore, svc := arrangeMachinePropagationTest(t)
+	machine := seedMachine(t, ctx, mockStore, "10.0.1.11")
+	seedSentAckedPropagation(t, ctx, propStore, machine.ID)
+
+	propagation, err := svc.GetPropagationStatus(ctx, machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if propagation.Sequence != 1 {
+		t.Errorf("Sequence = %d, want 1", propagation.Sequence)
+	}
+	if propagation.Status != "ACKED" {
+		t.Errorf("Status = %q, want %q", propagation.Status, "ACKED")
+	}
+	if propagation.Kind != "PACKAGE" {
+		t.Errorf("Kind = %q, want %q", propagation.Kind, "PACKAGE")
+	}
+	if propagation.PolicyID == nil || *propagation.PolicyID != 7 {
+		t.Errorf("PolicyID = %v, want 7", propagation.PolicyID)
+	}
+
+	wantSentAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if propagation.SentAt == nil || !propagation.SentAt.Equal(wantSentAt) {
+		t.Errorf("SentAt = %v, want %v", propagation.SentAt, wantSentAt)
+	}
+
+	wantAckedAt := time.Date(2026, 1, 1, 0, 0, 2, 500_000_000, time.UTC)
+	if propagation.AckedAt == nil || !propagation.AckedAt.Equal(wantAckedAt) {
+		t.Errorf("AckedAt = %v, want %v", propagation.AckedAt, wantAckedAt)
+	}
+
+	if propagation.DurationMS == nil || *propagation.DurationMS != 2500 {
+		t.Errorf("DurationMS = %v, want 2500", propagation.DurationMS)
+	}
+}
+
+func TestMachineService_GetPropagationStatus_WithoutRow_ReturnsPending(t *testing.T) {
+	ctx, mockStore, _, svc := arrangeMachinePropagationTest(t)
+	machine := seedMachine(t, ctx, mockStore, "10.0.1.11")
+
+	propagation, err := svc.GetPropagationStatus(ctx, machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	assertPendingPropagation(t, *propagation)
+}
+
+func TestMachineService_GetPropagationStatus_WithMissingMachine_ReturnsErrMachineNotFound(t *testing.T) {
+	ctx, _, _, svc := arrangeMachinePropagationTest(t)
+
+	_, err := svc.GetPropagationStatus(ctx, 999)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected %v, got %v", machineErrors.ErrMachineNotFound, err)
+	}
+}
+
+func TestMachineService_GetPropagationStatus_WhenStoreFails_ReturnsError(t *testing.T) {
+	ctx, mockStore, propStore, svc := arrangeMachinePropagationTest(t)
+	machine := seedMachine(t, ctx, mockStore, "10.0.1.11")
+	expectedErr := errors.New("propagation store unavailable")
+	propStore.LatestByMachineErr = expectedErr
+
+	_, err := svc.GetPropagationStatus(ctx, machine.ID)
+
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected store error %q, got %q", expectedErr, err)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -727,7 +871,7 @@ func arrangeMachineServiceTest(t *testing.T) (context.Context, *MockMachineStore
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
 	ctx := context.Background()
-	svc := service.NewMachineService(mockStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
+	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
 
 	return ctx, mockStore, svc, clock
 }
@@ -807,4 +951,83 @@ func (clock *testClock) Advance(duration time.Duration) {
 	clock.mu.Lock()
 	clock.now = clock.now.Add(duration)
 	clock.mu.Unlock()
+}
+
+// arrangeMachinePropagationTest initializes a machine service with mocked
+// machine and propagation stores over a controllable clock.
+func arrangeMachinePropagationTest(t *testing.T) (context.Context, *MockMachineStore, *MockPropagationStore, *service.MachineService) {
+	t.Helper()
+
+	mockStore := NewMockMachineStore()
+	propStore := NewMockPropagationStore()
+	clock := newTestClock()
+	ctx := context.Background()
+	svc := service.NewMachineService(mockStore, propStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
+
+	return ctx, mockStore, propStore, svc
+}
+
+// seedMachine upserts one machine by IP and returns it.
+func seedMachine(t *testing.T, ctx context.Context, store *MockMachineStore, ip string) *domain.Machine {
+	t.Helper()
+
+	machine, err := store.Upsert(ctx, domain.Machine{IP: ip, Name: "lcc1-011"})
+	if err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
+	}
+
+	return machine
+}
+
+// seedSentAckedPropagation creates one package propagation for the machine and
+// transitions it to ACKED with a 2500ms duration.
+func seedSentAckedPropagation(t *testing.T, ctx context.Context, store *MockPropagationStore, machineID int64) *domain.Propagation {
+	t.Helper()
+
+	policyID := int64(7)
+	created, err := store.Create(ctx, domain.Propagation{
+		MachineID:     machineID,
+		Kind:          domain.PropagationPackage,
+		PolicyID:      &policyID,
+		PolicyName:    "lab-whitelist",
+		PolicyVersion: 3,
+		PolicyType:    "WHITELIST",
+	}, func(int64) (string, error) { return "", nil })
+	if err != nil {
+		t.Fatalf("failed to seed propagation: %v", err)
+	}
+
+	sentAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.MarkSent(ctx, machineID, created.Sequence, sentAt); err != nil {
+		t.Fatalf("failed to mark propagation sent: %v", err)
+	}
+
+	ackedAt := time.Date(2026, 1, 1, 0, 0, 2, 500_000_000, time.UTC)
+	if err := store.Acknowledge(ctx, machineID, created.Sequence, domain.PropagationAcked, "", ackedAt); err != nil {
+		t.Fatalf("failed to acknowledge propagation: %v", err)
+	}
+
+	return created
+}
+
+// assertPendingPropagation verifies the synthesized representation of a machine
+// that never received a propagation.
+func assertPendingPropagation(t *testing.T, got schemas.PropagationOutputSchema) {
+	t.Helper()
+
+	if got.Sequence != 0 {
+		t.Errorf("Sequence = %d, want 0", got.Sequence)
+	}
+	if got.Kind != "" {
+		t.Errorf("Kind = %q, want empty", got.Kind)
+	}
+	if got.Status != "PENDING" {
+		t.Errorf("Status = %q, want %q", got.Status, "PENDING")
+	}
+	if got.PolicyID != nil {
+		t.Errorf("PolicyID = %v, want nil", got.PolicyID)
+	}
+	if got.SentAt != nil || got.AckedAt != nil || got.DurationMS != nil {
+		t.Errorf("timestamps = %v/%v/%v, want nils", got.SentAt, got.AckedAt, got.DurationMS)
+	}
 }

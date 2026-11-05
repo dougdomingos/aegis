@@ -350,6 +350,17 @@ func TestGroupHandler_LinkPolicy_WithInexistentPolicy_ReturnsStatus404(t *testin
 	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
+func TestGroupHandler_LinkPolicy_WithPolicyWithoutRules_ReturnsStatus409(t *testing.T) {
+	mock := &mockGroupService{
+		linkPolicyFn: func(_ context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error) {
+			return nil, groupErrors.ErrPolicyHasNoRules
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodPost, "/groups/lab1/policy", schemas.LinkPolicyToGroupSchema{PolicyName: "empty"})
+	assertStatusCode(t, rec, http.StatusConflict)
+}
+
 func TestGroupHandler_LinkPolicy_WithMalformedPayload_ReturnsStatus400(t *testing.T) {
 	mock := &mockGroupService{}
 

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,15 @@ const (
 
 	// orchestratorPort is the container port the Orchestrator listens on.
 	orchestratorPort = "8080/tcp"
+
+	// orchestratorGRPCPort is the container port of the Orchestrator's gRPC
+	// propagation server.
+	orchestratorGRPCPort = "9090/tcp"
+
+	// rulesStatePath is the in-container path of the Sentinel propagation
+	// state file. It lives under /tmp because the distroless nonroot runtime
+	// user cannot write /var/lib/aegis without a mounted volume.
+	rulesStatePath = "/tmp/aegis-rules.json"
 
 	// validLabKeyHex is a 32-byte lab key in lowercase hexadecimal shared by
 	// the Orchestrator and the fleet in the happy-path scenarios.
@@ -156,6 +166,7 @@ func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) tes
 		"AEGIS_SESSION_SECRET": sessionSecret,
 		"AEGIS_MACHINES":       machinesFilePath,
 		"AEGIS_DB":             "/home/nonroot/aegis.db",
+		"AEGIS_GRPC_ADDR":      ":9090",
 	}
 	for _, opt := range opts {
 		for key, value := range opt.env {
@@ -169,7 +180,7 @@ func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) tes
 			injectedFile(labKeyPath, validLabKeyHex+"\n"),
 			injectedFile(machinesFilePath, registry),
 		),
-		testcontainers.WithExposedPorts(orchestratorPort),
+		testcontainers.WithExposedPorts(orchestratorPort, orchestratorGRPCPort),
 		testcontainers.WithWaitStrategyAndDeadline(readyTimeout,
 			wait.ForHTTP("/machines").WithPort(orchestratorPort)),
 		tcnetwork.WithNetwork(nil, f.network),
@@ -287,8 +298,9 @@ func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string, opts ..
 		}
 	}
 
-	config := fmt.Sprintf(`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q%s}`,
-		orchestratorIP, labKeyPath, interval)
+	config := fmt.Sprintf(
+		`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q, "propagation_address": "%s:9090", "rules_state_path": %q%s}`,
+		orchestratorIP, labKeyPath, orchestratorIP, rulesStatePath, interval)
 
 	c, err := testcontainers.Run(context.Background(), e2eImage,
 		testcontainers.WithEntrypoint("/usr/local/bin/aegis-sentinel", "--config", sentinelConfigPath),
@@ -326,6 +338,36 @@ func (h *sentinelHandle) logs(t *testing.T) string {
 	out, err := io.ReadAll(reader)
 	if err != nil {
 		t.Fatalf("failed to read the logs of the sentinel at %s: %v", h.ip, err)
+	}
+
+	return string(out)
+}
+
+// restart starts a previously stopped Sentinel container again, reusing its
+// filesystem, so persisted state survives the restart exactly as it would on a
+// physical machine reboot.
+func (h *sentinelHandle) restart(t *testing.T) {
+	t.Helper()
+
+	if err := h.container.Start(context.Background()); err != nil {
+		t.Fatalf("failed to restart the sentinel at %s: %v", h.ip, err)
+	}
+}
+
+// readContainerFile returns the full contents of one file inside the Sentinel
+// container, used to inspect the persisted propagation state.
+func (h *sentinelHandle) readContainerFile(t *testing.T, path string) string {
+	t.Helper()
+
+	reader, err := h.container.CopyFileFromContainer(context.Background(), path)
+	if err != nil {
+		t.Fatalf("failed to copy %q from the sentinel at %s: %v", path, h.ip, err)
+	}
+	defer reader.Close()
+
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("failed to read %q from the sentinel at %s: %v", path, h.ip, err)
 	}
 
 	return string(out)
@@ -541,4 +583,214 @@ func (h *sentinelHandle) waitForExitCode(t *testing.T, want int, timeout time.Du
 	}
 
 	t.Fatalf("the sentinel at %s did not exit within %v;\nlogs:\n%s", h.ip, timeout, h.logs(t))
+}
+
+// ============================================================================
+// Orchestrator REST helpers
+// ============================================================================
+
+// orchestratorEndpoint returns the base URL of the running Orchestrator as
+// reachable from the test host.
+func (f *fleet) orchestratorEndpoint(t *testing.T) string {
+	t.Helper()
+
+	endpoint, err := f.orchestrator.PortEndpoint(context.Background(), orchestratorPort, "http")
+	if err != nil {
+		t.Fatalf("failed to resolve the orchestrator endpoint: %v", err)
+	}
+
+	return endpoint
+}
+
+// doJSON performs one request against the Orchestrator API, failing the test
+// when the response is not 2xx, and decodes the body into out when provided.
+func (f *fleet) doJSON(t *testing.T, method, path string, body any, out any) {
+	t.Helper()
+
+	var payload []byte
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to encode the %s %s payload: %v", method, path, err)
+		}
+
+		payload = encoded
+	}
+
+	request, err := http.NewRequestWithContext(context.Background(), method, f.orchestratorEndpoint(t)+path, bytes.NewReader(payload))
+	if err != nil {
+		t.Fatalf("failed to build the %s %s request: %v", method, path, err)
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("the %s %s request failed: %v", method, path, err)
+	}
+	defer response.Body.Close()
+
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("failed to read the %s %s response: %v", method, path, err)
+	}
+
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		t.Fatalf("%s %s status = %d, want 2xx; body: %s", method, path, response.StatusCode, string(raw))
+	}
+
+	if out != nil {
+		if err := json.Unmarshal(raw, out); err != nil {
+			t.Fatalf("failed to decode the %s %s response: %v; body: %s", method, path, err, string(raw))
+		}
+	}
+}
+
+// createPolicy registers a new policy and returns its output schema.
+func (f *fleet) createPolicy(t *testing.T, name, policyType string) schemas.PolicyOutputSchema {
+	t.Helper()
+
+	var policy schemas.PolicyOutputSchema
+	f.doJSON(t, http.MethodPost, "/policies", map[string]string{"name": name, "type": policyType}, &policy)
+
+	return policy
+}
+
+// listRules returns every rule currently stored in the policy.
+func (f *fleet) listRules(t *testing.T, policyID int64) []schemas.RuleOutputSchema {
+	t.Helper()
+
+	var rules []schemas.RuleOutputSchema
+	f.doJSON(t, http.MethodGet, fmt.Sprintf("/policies/%d/rules", policyID), nil, &rules)
+
+	return rules
+}
+
+// getPolicy returns the current stored representation of the policy, whose
+// version bumps on every rule change and rename.
+func (f *fleet) getPolicy(t *testing.T, policyID int64) schemas.PolicyOutputSchema {
+	t.Helper()
+
+	var policy schemas.PolicyOutputSchema
+	f.doJSON(t, http.MethodGet, fmt.Sprintf("/policies/%d", policyID), nil, &policy)
+
+	return policy
+}
+
+// createRule registers a new DOMAIN-valued rule within the policy.
+func (f *fleet) createRule(t *testing.T, policyID int64, value string) schemas.RuleOutputSchema {
+	t.Helper()
+
+	var rule schemas.RuleOutputSchema
+	f.doJSON(t, http.MethodPost, fmt.Sprintf("/policies/%d/rules", policyID),
+		map[string]string{"rule_type": "DOMAIN", "value": value}, &rule)
+
+	return rule
+}
+
+// updateRule applies a new value to an existing rule.
+func (f *fleet) updateRule(t *testing.T, policyID int64, ruleID int, value string) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodPatch, fmt.Sprintf("/policies/%d/rules/%d", policyID, ruleID),
+		map[string]string{"value": value}, nil)
+}
+
+// createGroup registers a new logical group.
+func (f *fleet) createGroup(t *testing.T, name string) schemas.GroupOutputSchema {
+	t.Helper()
+
+	var group schemas.GroupOutputSchema
+	f.doJSON(t, http.MethodPost, "/groups", map[string]string{"name": name}, &group)
+
+	return group
+}
+
+// linkMachine associates the machine with the group.
+func (f *fleet) linkMachine(t *testing.T, groupName string, machineID int64) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodPost, fmt.Sprintf("/groups/%s/machines", groupName),
+		map[string]int64{"machine_id": machineID}, nil)
+}
+
+// linkPolicy associates the named policy with the group.
+func (f *fleet) linkPolicy(t *testing.T, groupName, policyName string) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodPost, fmt.Sprintf("/groups/%s/policy", groupName),
+		map[string]string{"policy_name": policyName}, nil)
+}
+
+// unlinkPolicy clears the policy association of the group.
+func (f *fleet) unlinkPolicy(t *testing.T, groupName string) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodDelete, fmt.Sprintf("/groups/%s/policy", groupName), nil, nil)
+}
+
+// renamePolicy applies a new name to the policy.
+func (f *fleet) renamePolicy(t *testing.T, policyID int64, newName string) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodPatch, fmt.Sprintf("/policies/%d", policyID), map[string]string{"name": newName}, nil)
+}
+
+// deletePolicy removes the policy from the Orchestrator.
+func (f *fleet) deletePolicy(t *testing.T, policyID int64) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodDelete, fmt.Sprintf("/policies/%d", policyID), nil, nil)
+}
+
+// deleteGroup removes the group from the Orchestrator.
+func (f *fleet) deleteGroup(t *testing.T, groupName string) {
+	t.Helper()
+
+	f.doJSON(t, http.MethodDelete, fmt.Sprintf("/groups/%s", groupName), nil, nil)
+}
+
+// machineByIP returns the registry entry of the provided machine IP.
+func (f *fleet) machineByIP(t *testing.T, ip string) schemas.MachineOutputSchema {
+	t.Helper()
+
+	machine, exists := f.machines(t)[ip]
+	if !exists {
+		t.Fatalf("machine %s not found in the registry", ip)
+	}
+
+	return machine
+}
+
+// propagationOf reads the latest propagation state of the machine through the
+// single-machine endpoint.
+func (f *fleet) propagationOf(t *testing.T, machineID int64) schemas.PropagationOutputSchema {
+	t.Helper()
+
+	var propagation schemas.PropagationOutputSchema
+	f.doJSON(t, http.MethodGet, fmt.Sprintf("/machines/%d/propagation", machineID), nil, &propagation)
+
+	return propagation
+}
+
+// waitForPropagation polls the machine list until the provided condition holds
+// over its latest propagation state, failing the test on timeout.
+func (f *fleet) waitForPropagation(t *testing.T, ip string, want string, condition func(schemas.PropagationOutputSchema) bool) schemas.PropagationOutputSchema {
+	t.Helper()
+
+	deadline := time.Now().Add(readyTimeout)
+	for {
+		propagation := f.machineByIP(t, ip).Propagation
+		if condition(propagation) {
+			return propagation
+		}
+
+		if time.Now().After(deadline) {
+			encoded, _ := json.Marshal(propagation)
+			t.Fatalf("propagation of %s never reached %s within %v; latest: %s",
+				ip, want, readyTimeout, string(encoded))
+		}
+
+		time.Sleep(250 * time.Millisecond)
+	}
 }

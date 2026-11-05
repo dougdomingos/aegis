@@ -22,6 +22,10 @@ type MachineService struct {
 	// store provides database operations related to machines.
 	store domain.MachineStore
 
+	// propagations provides the latest propagation state of each machine for
+	// the status views.
+	propagations domain.PropagationStore
+
 	// labKey is the shared HMAC key used to verify machine authentication
 	// challenges.
 	labKey []byte
@@ -44,10 +48,11 @@ type MachineService struct {
 }
 
 // NewMachineService creates a new service instance with the provided store
-// provider and authentication secrets.
-func NewMachineService(machineStore domain.MachineStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
+// providers and authentication secrets.
+func NewMachineService(machineStore domain.MachineStore, propagationStore domain.PropagationStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
 	return &MachineService{
 		store:          machineStore,
+		propagations:   propagationStore,
 		labKey:         labKey,
 		sessionSecret:  sessionSecret,
 		sessionTTL:     sessionTTL,
@@ -71,12 +76,57 @@ func (service *MachineService) ListMachines(ctx context.Context) ([]schemas.Mach
 		return nil, err
 	}
 
+	propagations, err := service.propagations.ListLatest(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	latestByMachine := make(map[int64]domain.Propagation, len(propagations))
+	for _, propagation := range propagations {
+		latestByMachine[propagation.MachineID] = propagation
+	}
+
 	output := make([]schemas.MachineOutputSchema, 0, len(machines))
 	for i := range machines {
-		output = append(output, *mapMachineToOutputSchema(&machines[i], service.now(), service.stalenessGrace))
+		schema := mapMachineToOutputSchema(&machines[i], service.now(), service.stalenessGrace)
+
+		if propagation, exists := latestByMachine[machines[i].ID]; exists {
+			schema.Propagation = mapPropagationToOutputSchema(&propagation)
+		} else {
+			schema.Propagation = pendingPropagationOutput()
+		}
+
+		output = append(output, *schema)
 	}
 
 	return output, nil
+}
+
+// GetPropagationStatus returns the latest propagation state of the machine. A machine
+// that never received a message reports the PENDING representation instead of
+// an error; an unknown machine returns ErrMachineNotFound.
+func (service *MachineService) GetPropagationStatus(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error) {
+	machine, err := service.store.GetByID(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+
+	if machine == nil {
+		return nil, machineErrors.ErrMachineNotFound
+	}
+
+	propagation, err := service.propagations.LatestByMachine(ctx, machineID)
+	if err != nil {
+		return nil, err
+	}
+
+	if propagation == nil {
+		pending := pendingPropagationOutput()
+		return &pending, nil
+	}
+
+	mapped := mapPropagationToOutputSchema(propagation)
+	return &mapped, nil
 }
 
 // InitiateAuthentication starts an authentication challenge for the provided
@@ -189,5 +239,41 @@ func mapMachineToOutputSchema(machine *domain.Machine, now time.Time, grace time
 		Status:     string(status),
 		LastSeenAt: machine.LastSeenAt,
 		CreatedAt:  machine.CreatedAt,
+	}
+}
+
+// mapPropagationToOutputSchema converts the Propagation entity format into the
+// output schema provided by this service, deriving the acknowledgement duration
+// when both delivery timestamps are present.
+func mapPropagationToOutputSchema(propagation *domain.Propagation) schemas.PropagationOutputSchema {
+	output := schemas.PropagationOutputSchema{
+		Sequence:      propagation.Sequence,
+		Kind:          string(propagation.Kind),
+		Status:        string(propagation.Status),
+		PolicyID:      propagation.PolicyID,
+		PolicyName:    propagation.PolicyName,
+		PolicyVersion: propagation.PolicyVersion,
+		PolicyType:    propagation.PolicyType,
+		SentAt:        propagation.SentAt,
+		AckedAt:       propagation.AckedAt,
+		NackReason:    propagation.NackReason,
+	}
+
+	if propagation.SentAt != nil && propagation.AckedAt != nil {
+		duration := propagation.AckedAt.Sub(*propagation.SentAt).Milliseconds()
+		output.DurationMS = &duration
+	}
+
+	return output
+}
+
+// pendingPropagationOutput returns the representation of a machine that never
+// received a propagation.
+func pendingPropagationOutput() schemas.PropagationOutputSchema {
+	return schemas.PropagationOutputSchema{
+		Sequence: 0,
+		Kind:     "",
+		Status:   string(domain.PropagationPending),
+		PolicyID: nil,
 	}
 }

@@ -3,5 +3,7 @@
   "lab_key_path": "/etc/aegis/lab.key",
   "request_timeout": "10s",
   "log_level": "info",
-  "log_format": "text"
+  "log_format": "text",
+  "propagation_address": "10.0.0.5:9090",
+  "rules_state_path": "/var/lib/aegis/rules.json"
 }

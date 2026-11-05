@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +33,14 @@ const (
 	// defaultHeartbeatInterval is the default period between connectivity
 	// heartbeats when the configuration does not override it.
 	defaultHeartbeatInterval = 30 * time.Second
+
+	// defaultPropagationPort is the port combined with the Orchestrator host
+	// when propagation_address is unset.
+	defaultPropagationPort = "9090"
+
+	// defaultRulesStatePath is the durable state file of the propagation
+	// runner when the configuration does not override it.
+	defaultRulesStatePath = "/var/lib/aegis/rules.json"
 
 	// maxHeartbeatInterval mirrors the Orchestrator's machine staleness grace
 	// (90s): an interval equal to or longer than it would leave a machine
@@ -59,16 +69,26 @@ type Config struct {
 
 	// LogFormat is the output format of the emitted log records.
 	LogFormat logging.Format
+
+	// PropagationAddress is the host:port of the Orchestrator's gRPC
+	// propagation server.
+	PropagationAddress string
+
+	// RulesStatePath is the durable state file where the Sentinel stores the
+	// last applied propagation.
+	RulesStatePath string
 }
 
 // document mirrors the JSON configuration file schema.
 type document struct {
-	OrchestratorURL   string `json:"orchestrator_url"`
-	LabKeyPath        string `json:"lab_key_path"`
-	RequestTimeout    string `json:"request_timeout"`
-	HeartbeatInterval string `json:"heartbeat_interval"`
-	LogLevel          string `json:"log_level"`
-	LogFormat         string `json:"log_format"`
+	OrchestratorURL    string `json:"orchestrator_url"`
+	LabKeyPath         string `json:"lab_key_path"`
+	RequestTimeout     string `json:"request_timeout"`
+	HeartbeatInterval  string `json:"heartbeat_interval"`
+	LogLevel           string `json:"log_level"`
+	LogFormat          string `json:"log_format"`
+	PropagationAddress string `json:"propagation_address"`
+	RulesStatePath     string `json:"rules_state_path"`
 }
 
 // Load reads and validates the Sentinel daemon configuration from the file
@@ -117,13 +137,25 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	propagationAddress, err := parsePropagationAddress(doc.PropagationAddress, orchestratorURL)
+	if err != nil {
+		return nil, err
+	}
+
+	rulesStatePath, err := parseRulesStatePath(doc.RulesStatePath)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
-		OrchestratorURL:   orchestratorURL,
-		LabKey:            labKey,
-		RequestTimeout:    requestTimeout,
-		HeartbeatInterval: heartbeatInterval,
-		LogLevel:          logLevel,
-		LogFormat:         logFormat,
+		OrchestratorURL:    orchestratorURL,
+		LabKey:             labKey,
+		RequestTimeout:     requestTimeout,
+		HeartbeatInterval:  heartbeatInterval,
+		LogLevel:           logLevel,
+		LogFormat:          logFormat,
+		PropagationAddress: propagationAddress,
+		RulesStatePath:     rulesStatePath,
 	}, nil
 }
 
@@ -240,4 +272,46 @@ func parseHeartbeatInterval(raw string) (time.Duration, error) {
 	}
 
 	return interval, nil
+}
+
+// parsePropagationAddress resolves the gRPC propagation address, defaulting to
+// the Orchestrator host with the default propagation port. An explicit value
+// must be a host:port pair with a non-empty host and a port within
+// [1, 65535].
+func parsePropagationAddress(raw string, orchestratorURL *url.URL) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return net.JoinHostPort(orchestratorURL.Hostname(), defaultPropagationPort), nil
+	}
+
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid propagation_address %q: %w", value, err)
+	}
+
+	if host == "" {
+		return "", fmt.Errorf("invalid propagation_address %q: host must not be empty", value)
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil {
+		return "", fmt.Errorf("invalid propagation_address %q: port must be a number", value)
+	}
+
+	if number < 1 || number > 65535 {
+		return "", fmt.Errorf("invalid propagation_address %q: port must be between 1 and 65535", value)
+	}
+
+	return value, nil
+}
+
+// parseRulesStatePath resolves the durable propagation state path, falling back
+// to the default when unset.
+func parseRulesStatePath(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultRulesStatePath, nil
+	}
+
+	return value, nil
 }

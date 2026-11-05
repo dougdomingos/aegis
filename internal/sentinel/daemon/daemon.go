@@ -48,6 +48,9 @@ type Session struct {
 	// ExpiresAt is the moment at which the session token expires.
 	ExpiresAt time.Time
 
+	// MachineID is the identifier assigned to the machine by the Orchestrator.
+	MachineID int64
+
 	// MachineName is the name assigned to the machine by the Orchestrator.
 	MachineName string
 

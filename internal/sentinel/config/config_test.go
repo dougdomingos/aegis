@@ -56,6 +56,83 @@ func TestConfig_Load_WithValidFile_ReturnsParsedConfig(t *testing.T) {
 	}
 }
 
+func TestConfig_Load_PropagationAddress_UnsetField_DefaultsToOrchestratorHostPort9090(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.PropagationAddress != "10.0.0.5:9090" {
+		t.Errorf("cfg.PropagationAddress = %q, want %q", cfg.PropagationAddress, "10.0.0.5:9090")
+	}
+}
+
+func TestConfig_Load_PropagationAddress_ValidValue_ReturnsConfiguredAddress(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `", "propagation_address": "172.30.0.10:9091"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.PropagationAddress != "172.30.0.10:9091" {
+		t.Errorf("cfg.PropagationAddress = %q, want %q", cfg.PropagationAddress, "172.30.0.10:9091")
+	}
+}
+
+func TestConfig_Load_PropagationAddress_InvalidValues_ReturnError(t *testing.T) {
+	cases := map[string]struct {
+		address string
+	}{
+		"no port":    {address: "10.0.0.5"},
+		"bad port":   {address: "10.0.0.5:abc"},
+		"empty host": {address: ":9090"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			keyPath := writeTempFile(t, labKeyFile)
+			document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `", "propagation_address": "` + tc.address + `"}`
+
+			if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+				t.Errorf("expected an error for propagation address %q, got nil", tc.address)
+			}
+		})
+	}
+}
+
+func TestConfig_Load_RulesStatePath_UnsetField_DefaultsToVarLibAegis(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.RulesStatePath != "/var/lib/aegis/rules.json" {
+		t.Errorf("cfg.RulesStatePath = %q, want %q", cfg.RulesStatePath, "/var/lib/aegis/rules.json")
+	}
+}
+
+func TestConfig_Load_RulesStatePath_ValidValue_ReturnsConfiguredPath(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `", "rules_state_path": "/tmp/aegis-rules.json"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.RulesStatePath != "/tmp/aegis-rules.json" {
+		t.Errorf("cfg.RulesStatePath = %q, want %q", cfg.RulesStatePath, "/tmp/aegis-rules.json")
+	}
+}
+
 func TestConfig_Load_WithOptionalFields_ReturnsConfiguredValues(t *testing.T) {
 	keyPath := writeTempFile(t, labKeyFile)
 	document := `{

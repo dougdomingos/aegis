@@ -49,6 +49,10 @@ type GroupStore interface {
 	// List retrieves all existent groups within the database.
 	List(ctx context.Context) ([]Group, error)
 
+	// ListByPolicy retrieves every group linked to the policy whose ID matches
+	// the provided argument.
+	ListByPolicy(ctx context.Context, policyID int64) ([]Group, error)
+
 	// Remove removes the group whose name matches the provided argument.
 	Remove(ctx context.Context, name string) error
 
@@ -58,4 +62,8 @@ type GroupStore interface {
 
 	// UnlinkFromPolicy clears the policy association of the group.
 	UnlinkFromPolicy(ctx context.Context, groupName string) (*Group, error)
+
+	// IsPolicyLinked reports whether any group is linked to the policy whose ID
+	// matches the provided argument.
+	IsPolicyLinked(ctx context.Context, policyID int64) (bool, error)
 }

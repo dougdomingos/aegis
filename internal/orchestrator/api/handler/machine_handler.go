@@ -22,6 +22,7 @@ type MachineServiceInterface interface {
 	InitiateAuthentication(ctx context.Context, p schemas.InitiateAuthenticationSchema) (*schemas.InitiateOutputSchema, error)
 	Authenticate(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
 	Heartbeat(ctx context.Context, token string) error
+	GetPropagationStatus(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error)
 }
 
 // MachineHandler implements the methods that map HTTP requests into operations
@@ -39,6 +40,7 @@ func NewMachineHandler(s MachineServiceInterface) *MachineHandler {
 func (handler *MachineHandler) RegisterRoutes(r chi.Router) {
 	r.Route("/machines", func(r chi.Router) {
 		r.Get("/", handler.List)
+		r.Get("/{id}/propagation", handler.GetPropagationStatus)
 		r.Post("/authenticate/init", handler.Initiate)
 		r.Post("/authenticate", handler.Authenticate)
 		r.Post("/heartbeat", handler.Heartbeat)
@@ -58,6 +60,26 @@ func (handler *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.EncodeToJSON(w, http.StatusOK, machines)
+}
+
+// GetPropagationStatus handles requests to read the latest propagation state of a
+// single machine. Machines that never received a message report PENDING with
+// HTTP 200; unknown machines return 404.
+func (handler *MachineHandler) GetPropagationStatus(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseMachineID(w, r, "id")
+	if !ok {
+		return
+	}
+
+	res, err := handler.service.GetPropagationStatus(r.Context(), id)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrMachineNotFound: http.StatusNotFound,
+		})
+		return
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, res)
 }
 
 // Initiate handles requests to start an authentication challenge for a machine.

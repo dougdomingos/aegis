@@ -1,8 +1,12 @@
-.PHONY: init tests coverage test-report e2e build help
+.PHONY: init proto tests coverage test-report e2e build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
 TEST_PACKAGES = ./internal/orchestrator/store \
+	./internal/common/rules \
+	./internal/common/propagation \
+	./internal/orchestrator/api/grpcserver \
+	./internal/sentinel/propagation \
 	./internal/orchestrator/service \
 	./internal/orchestrator/config \
 	./internal/common/auth \
@@ -21,24 +25,33 @@ init: ## Install utility tools for development lifecycle
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/dougdomingos/test-prettify@latest
 	go install golang.org/x/tools/cmd/goimports@latest
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	lefthook install
 
-build: ## Build both binaries into ./bin
+proto: ## Generate gRPC code from the propagation proto contract
+	@mkdir -p pkg/pb
+	protoc --proto_path=proto \
+		--go_out=pkg/pb --go_opt=paths=source_relative \
+		--go-grpc_out=pkg/pb --go-grpc_opt=paths=source_relative \
+		proto/propagation.proto
+
+build: proto ## Build both binaries into ./bin
 	@mkdir -p bin
 	@go build -o bin/aegis-orchestrator ./cmd/orchestrator
 	@go build -o bin/aegis-sentinel ./cmd/sentinel
 
-tests: ## Run all tests and report errors only
+tests: proto ## Run all tests and report errors only
 	@go test -short $(TEST_PACKAGES)
 
-coverage: ## Run all tests and compute coverage
+coverage: proto ## Run all tests and compute coverage
 	@go test -v -coverprofile=coverage.out $(TEST_PACKAGES)
 	@go tool cover -func=coverage.out
 
-test-report: ## Run all tests and yield report as HTML
+test-report: proto ## Run all tests and yield report as HTML
 	@go test -v -json -coverprofile=coverage.out $(TEST_PACKAGES) | test-prettify --cov-prof coverage.out
 
-e2e: ## Run the end-to-end suite with Testcontainers (requires Docker)
+e2e: proto ## Run the end-to-end suite with Testcontainers (requires Docker)
 	@go test -tags e2e -timeout 30m -v ./e2e/...
 
 help: ## Show help for each make command

@@ -28,3 +28,39 @@ The system decouples policy administration from packet processing by employing a
 
 ## Academic Context
 This software is developed as an undergraduate capstone project (Trabalho de Conclusão de Curso - TCC) under the Guardians UFCG initiative.
+
+## Building & Running
+
+### Prerequisites
+
+- Go 1.26+
+- `protoc` (the protocol buffers compiler) as a system package. The Go plugins
+  it needs (`protoc-gen-go` and `protoc-gen-go-grpc`) are installed by
+  `make init`.
+
+### Build
+
+```sh
+make init    # install development tooling, including the protoc plugins
+make proto   # generate pkg/pb from proto/propagation.proto
+make build   # produce bin/aegis-orchestrator and bin/aegis-sentinel
+```
+
+The generated code under `pkg/pb` is never committed; `make tests`,
+`make coverage` and `make e2e` run `make proto` as a prerequisite.
+
+### Orchestrator configuration
+
+The Orchestrator reads environment variables, documented in `.env.example`.
+`AEGIS_GRPC_ADDR` is the address the gRPC propagation server binds to
+(default `:9090`).
+
+### Sentinel configuration
+
+The Sentinel reads a JSON file, documented in `examples/sentinel.config.json`.
+Propagation is controlled by two optional fields:
+
+- `propagation_address`: the `host:port` of the Orchestrator's gRPC propagation
+  server. Defaults to the `orchestrator_url` host with port `9090`.
+- `rules_state_path`: the file where the Sentinel durably stores the last
+  applied rules, written atomically. Defaults to `/var/lib/aegis/rules.json`.

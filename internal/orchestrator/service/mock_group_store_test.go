@@ -16,7 +16,14 @@ import (
 type MockGroupStore struct {
 	groups   map[int64]*domain.Group
 	StoreErr error
-	nextID   int64
+
+	// RemoveErr aborts Remove alone, leaving the rest of the store functional.
+	RemoveErr error
+
+	// RemoveLog, when set, receives "remove" on every Remove attempt, so tests
+	// can assert the delete ordering against notifier calls.
+	RemoveLog *[]string
+	nextID    int64
 }
 
 // NewMockGroupStore initializes a new MockGroupStore instance.
@@ -120,8 +127,32 @@ func (mock *MockGroupStore) List(ctx context.Context) ([]domain.Group, error) {
 	return list, nil
 }
 
+// ListByPolicy returns the groups linked to the provided policy.
+func (mock *MockGroupStore) ListByPolicy(ctx context.Context, policyID int64) ([]domain.Group, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	linked := make([]domain.Group, 0)
+	for _, group := range mock.groups {
+		if group.PolicyID != nil && *group.PolicyID == policyID {
+			linked = append(linked, *group)
+		}
+	}
+
+	return linked, nil
+}
+
 // Remove deletes a group by name or returns StoreErr if set.
 func (mock *MockGroupStore) Remove(ctx context.Context, name string) error {
+	if mock.RemoveLog != nil {
+		*mock.RemoveLog = append(*mock.RemoveLog, "remove")
+	}
+
+	if mock.RemoveErr != nil {
+		return mock.RemoveErr
+	}
+
 	if mock.StoreErr != nil {
 		return mock.StoreErr
 	}
@@ -179,4 +210,20 @@ func (mock *MockGroupStore) UnlinkFromPolicy(ctx context.Context, groupName stri
 	group.PolicyName = ""
 
 	return group, nil
+}
+
+// IsPolicyLinked reports whether any group is linked to a policy, or returns
+// StoreErr if set.
+func (mock *MockGroupStore) IsPolicyLinked(ctx context.Context, policyID int64) (bool, error) {
+	if mock.StoreErr != nil {
+		return false, mock.StoreErr
+	}
+
+	for _, group := range mock.groups {
+		if group.PolicyID != nil && *group.PolicyID == policyID {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }

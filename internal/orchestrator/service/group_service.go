@@ -26,6 +26,14 @@ type GroupService struct {
 	// resolve and link policies to groups.
 	policyStore domain.PolicyStore
 
+	// ruleStore provides database operations related to rules, used to ensure
+	// a policy has rules before it is linked to a group.
+	ruleStore domain.RuleStore
+
+	// notifier propagates group membership changes to the distribution
+	// pipeline. It may be nil, disabling notifications.
+	notifier PropagationNotifier
+
 	// stalenessGrace is the duration a machine remains displayed as CONNECTED
 	// after its last heartbeat.
 	stalenessGrace time.Duration
@@ -35,12 +43,14 @@ type GroupService struct {
 }
 
 // NewGroupService creates a new service instance with the provided store
-// manager.
-func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, stalenessGrace time.Duration, now func() time.Time) *GroupService {
+// managers and propagation notifier. The notifier may be nil.
+func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, ruleStore domain.RuleStore, notifier PropagationNotifier, stalenessGrace time.Duration, now func() time.Time) *GroupService {
 	return &GroupService{
 		store:          store,
 		machineStore:   machineStore,
 		policyStore:    policyStore,
+		ruleStore:      ruleStore,
+		notifier:       notifier,
 		stalenessGrace: stalenessGrace,
 		now:            now,
 	}
@@ -155,23 +165,37 @@ func (service *GroupService) ChangeGroupName(ctx context.Context, payload schema
 }
 
 // RemoveGroup deletes a group from the database by its name. If no group
-// matches the requested name, it returns an error.
+// matches the requested name, it returns an error. Machines of the group are
+// resolved before the deletion, so a resolution failure aborts it; the revoke
+// is enqueued only after the deletion succeeds.
 func (service *GroupService) RemoveGroup(ctx context.Context, payload schemas.RemoveGroupSchema) error {
 	if strings.TrimSpace(payload.Name) == "" {
 		return errors.ErrGroupNameRequired
 	}
 
-	doesGroupExists, err := service.store.Exists(ctx, payload.Name)
+	group, err := service.store.GetByName(ctx, payload.Name)
 	if err != nil {
 		return err
 	}
 
-	if !doesGroupExists {
+	if group == nil {
 		return errors.ErrGroupNotFound
+	}
+
+	var machineIDs []int64
+	if service.notifier != nil {
+		machineIDs, err = service.notifier.ResolveGroupMachines(ctx, group.ID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve machines of group %q: %w", payload.Name, err)
+		}
 	}
 
 	if err := service.store.Remove(ctx, payload.Name); err != nil {
 		return fmt.Errorf("failed to remove group %q: %v", payload.Name, err)
+	}
+
+	if service.notifier != nil {
+		service.notifier.RevokeMachines(ctx, machineIDs, nil)
 	}
 
 	return nil
@@ -204,6 +228,8 @@ func (service *GroupService) LinkMachine(ctx context.Context, groupName string, 
 	if err != nil {
 		return nil, err
 	}
+
+	service.notifyMachine(ctx, machineID)
 
 	return mapMachineToOutputSchema(linked, service.now(), service.stalenessGrace), nil
 }
@@ -239,6 +265,8 @@ func (service *GroupService) UnlinkMachine(ctx context.Context, groupName string
 		return nil, err
 	}
 
+	service.notifyMachine(ctx, machineID)
+
 	return mapMachineToOutputSchema(unlinked, service.now(), service.stalenessGrace), nil
 }
 
@@ -270,12 +298,22 @@ func (service *GroupService) LinkPolicy(ctx context.Context, groupName string, p
 		return nil, errors.ErrPolicyNotFound
 	}
 
+	ruleCount, err := service.ruleStore.CountByPolicy(ctx, policy.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ruleCount == 0 {
+		return nil, errors.ErrPolicyHasNoRules
+	}
+
 	linked, err := service.store.LinkToPolicy(ctx, groupName, policy.ID)
 	if err != nil {
 		return nil, err
 	}
 
 	linked.PolicyName = policy.Name
+
+	service.notifyGroup(ctx, group.ID)
 
 	return mapGroupToOutputSchema(linked, nil), nil
 }
@@ -303,7 +341,28 @@ func (service *GroupService) UnlinkPolicy(ctx context.Context, groupName string)
 		return nil, err
 	}
 
+	service.notifyGroup(ctx, group.ID)
+
 	return mapGroupToOutputSchema(unlinked, nil), nil
+}
+
+// notifyMachine best-effort marks the machine pending with a package intent.
+func (service *GroupService) notifyMachine(ctx context.Context, machineID int64) {
+	if service.notifier == nil {
+		return
+	}
+
+	service.notifier.NotifyMachine(ctx, machineID)
+}
+
+// notifyGroup best-effort marks the group's machines pending with package
+// intents.
+func (service *GroupService) notifyGroup(ctx context.Context, groupID int64) {
+	if service.notifier == nil {
+		return
+	}
+
+	service.notifier.NotifyGroup(ctx, groupID)
 }
 
 // mapGroupToOutputSchema converts the Group entity format into the output

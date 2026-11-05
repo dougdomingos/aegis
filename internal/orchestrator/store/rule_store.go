@@ -16,18 +16,33 @@ const (
 	queryUpdateRuleByID = "UPDATE rules SET value = ?, protocol = ?, port = ? WHERE id = ?"
 	queryDeleteRuleByID = "DELETE FROM rules WHERE id = ?"
 	queryColumnsRule    = "SELECT id, policy_id, type, value, protocol, port, created_at FROM rules"
+
+	queryBumpPolicyVersion       = "UPDATE policies SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+	queryBumpPolicyVersionByRule = "UPDATE policies SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = (SELECT policy_id FROM rules WHERE id = ?)"
+	queryCountRulesByPolicy      = "SELECT COUNT(*) FROM rules WHERE policy_id = ?"
 )
 
 // RuleStore manages all database-related operations over rules.
 type RuleStore struct {
+	db       *sql.DB
 	executor *query.QueryExecutor[domain.Rule]
 }
 
 // NewRuleStore creates a new RuleStore instance.
 func NewRuleStore(db *sql.DB) *RuleStore {
 	return &RuleStore{
+		db:       db,
 		executor: query.NewQueryExecutor(db, mapRowToRule),
 	}
+}
+
+func (store *RuleStore) CountByPolicy(ctx context.Context, policyID int64) (int64, error) {
+	var count int64
+	if err := store.db.QueryRowContext(ctx, queryCountRulesByPolicy, policyID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count rules of policy %d: %w", policyID, err)
+	}
+
+	return count, nil
 }
 
 func (store *RuleStore) Create(ctx context.Context, rule domain.Rule) (*domain.Rule, error) {
@@ -46,6 +61,10 @@ func (store *RuleStore) Create(ctx context.Context, rule domain.Rule) (*domain.R
 		id, err := result.LastInsertId()
 		if err != nil {
 			return fmt.Errorf("failed to retrieve created rule id: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx, queryBumpPolicyVersion, rule.PolicyID); err != nil {
+			return fmt.Errorf("failed to bump policy version: %w", err)
 		}
 
 		row := tx.QueryRowContext(ctx, queryGetRuleByID, id)
@@ -97,47 +116,64 @@ func (store *RuleStore) Update(ctx context.Context, rule domain.Rule) (*domain.R
 		return nil, err
 	}
 
-	result, err := store.executor.Exec(
-		ctx,
-		queryUpdateRuleByID,
-		rule.Value,
-		rule.Protocol,
-		rule.Port,
-		rule.ID)
+	err := store.executor.WithTx(ctx, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(
+			ctx,
+			queryUpdateRuleByID,
+			rule.Value,
+			rule.Protocol,
+			rule.Port,
+			rule.ID)
+
+		if err != nil {
+			return fmt.Errorf("failed to update rule: %w", err)
+		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to check rows affected: %w", err)
+		}
+
+		if rowsAffected == 0 {
+			return fmt.Errorf("rule with id %d not found", rule.ID)
+		}
+
+		if _, err := tx.ExecContext(ctx, queryBumpPolicyVersion, rule.PolicyID); err != nil {
+			return fmt.Errorf("failed to bump policy version: %w", err)
+		}
+
+		return nil
+	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to update rule: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to check rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return nil, fmt.Errorf("rule with id %d not found", rule.ID)
+		return nil, err
 	}
 
 	return &rule, nil
 }
 
 func (store *RuleStore) Remove(ctx context.Context, id int64) error {
-	result, err := store.executor.Exec(ctx, queryDeleteRuleByID, id)
+	return store.executor.WithTx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, queryBumpPolicyVersionByRule, id); err != nil {
+			return fmt.Errorf("failed to bump policy version: %w", err)
+		}
 
-	if err != nil {
-		return fmt.Errorf("failed to update rule: %w", err)
-	}
+		result, err := tx.ExecContext(ctx, queryDeleteRuleByID, id)
+		if err != nil {
+			return fmt.Errorf("failed to update rule: %w", err)
+		}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to check rows affected: %w", err)
-	}
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to check rows affected: %w", err)
+		}
 
-	if rowsAffected == 0 {
-		return fmt.Errorf("rule with id %d not found", id)
-	}
+		if rowsAffected == 0 {
+			return fmt.Errorf("rule with id %d not found", id)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // mapRowToRule maps a scan function to a domain.Rule struct.

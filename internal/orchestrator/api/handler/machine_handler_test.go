@@ -207,3 +207,69 @@ func TestMachineHandler_Heartbeat_InvalidToken_ReturnsUnauthorized(t *testing.T)
 		})
 	}
 }
+
+// ============================================================================
+// GetPropagationStatus
+// ============================================================================
+
+func TestMachineHandler_GetPropagationStatus_WithKnownMachine_ReturnsOK(t *testing.T) {
+	mock := &mockMachineService{
+		getPropagationStatusFn: func(_ context.Context, machineID int64) (*schemas.PropagationOutputSchema, error) {
+			return &schemas.PropagationOutputSchema{
+				Sequence:   4,
+				Kind:       "PACKAGE",
+				Status:     "ACKED",
+				PolicyID:   &machineID,
+				PolicyName: "lab-whitelist",
+			}, nil
+		},
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/7/propagation", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestMachineHandler_GetPropagationStatus_WithPendingMachine_ReturnsOK(t *testing.T) {
+	mock := &mockMachineService{
+		getPropagationStatusFn: func(_ context.Context, _ int64) (*schemas.PropagationOutputSchema, error) {
+			return &schemas.PropagationOutputSchema{Status: "PENDING"}, nil
+		},
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/7/propagation", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestMachineHandler_GetPropagationStatus_WithInvalidID_ReturnsBadRequest(t *testing.T) {
+	mock := &mockMachineService{
+		getPropagationStatusFn: func(_ context.Context, _ int64) (*schemas.PropagationOutputSchema, error) {
+			t.Error("the service must not be called for an invalid machine id")
+			return nil, nil
+		},
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/abc/propagation", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestMachineHandler_GetPropagationStatus_WithMissingMachine_ReturnsNotFound(t *testing.T) {
+	mock := &mockMachineService{
+		getPropagationStatusFn: func(_ context.Context, _ int64) (*schemas.PropagationOutputSchema, error) {
+			return nil, machineErrors.ErrMachineNotFound
+		},
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/7/propagation", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestMachineHandler_GetPropagationStatus_WhenServiceFails_ReturnsInternalServerError(t *testing.T) {
+	mock := &mockMachineService{
+		getPropagationStatusFn: func(_ context.Context, _ int64) (*schemas.PropagationOutputSchema, error) {
+			return nil, errors.New("propagation store unavailable")
+		},
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/7/propagation", nil)
+	assertStatusCode(t, rec, http.StatusInternalServerError)
+}

@@ -16,7 +16,14 @@ import (
 type MockPolicyStore struct {
 	policies map[int64]*domain.Policy
 	StoreErr error
-	nextID   int64
+
+	// RemoveErr aborts Remove alone, leaving the rest of the store functional.
+	RemoveErr error
+
+	// RemoveLog, when set, receives "remove" on every Remove attempt, so tests
+	// can assert the delete ordering against notifier calls.
+	RemoveLog *[]string
+	nextID    int64
 }
 
 // NewMockPolicyStore initializes a new MockPolicyStore instance.
@@ -130,6 +137,14 @@ func (mock *MockPolicyStore) List(ctx context.Context) ([]domain.Policy, error) 
 
 // Remove deletes a policy by id or returns StoreErr if set.
 func (mock *MockPolicyStore) Remove(ctx context.Context, id int64) error {
+	if mock.RemoveLog != nil {
+		*mock.RemoveLog = append(*mock.RemoveLog, "remove")
+	}
+
+	if mock.RemoveErr != nil {
+		return mock.RemoveErr
+	}
+
 	if mock.StoreErr != nil {
 		return mock.StoreErr
 	}

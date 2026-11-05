@@ -531,6 +531,30 @@ func TestRuleService_UpdateIPRule_WithValidPayload_AcceptsUpdate(t *testing.T) {
 	}
 }
 
+func TestRuleService_UpdateRule_WithUnchangedValues_DoesNotCallStoreUpdate(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	sameValue := seededRule.Value
+
+	updatedRule, err := service.UpdateRule(
+		ctx,
+		schemas.UpdateRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID), Value: &sameValue},
+	)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if env.rules.UpdateCalls != 0 {
+		t.Errorf("expected store update not to be called, got %d calls", env.rules.UpdateCalls)
+	}
+
+	if updatedRule.ID != int(seededRule.ID) || updatedRule.Value != seededRule.Value {
+		t.Errorf("expected returned rule to equal stored rule %+v, got %+v", seededRule, updatedRule)
+	}
+}
+
 func TestRuleService_UpdateRule_WithEmptyValue_RejectsUpdate(t *testing.T) {
 	ctx, env, service := arrangeRuleServiceTest(t)
 	seededRule := seedRule(t, ctx, env.rules,
@@ -712,6 +736,57 @@ func TestRuleService_RemoveRule_WithRuleOfAnotherPolicy_RejectsRemoval(t *testin
 	}
 }
 
+func TestRuleService_RemoveRule_LastRuleOfLinkedPolicy_ReturnsErrLinkedPolicyLastRule(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	linkPolicyToGroup(t, ctx, env)
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if !errors.Is(err, ruleErrors.ErrLinkedPolicyLastRule) {
+		t.Errorf("expected error %q, got %q", ruleErrors.ErrLinkedPolicyLastRule, err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule == nil {
+		t.Error("expected rule to be kept untouched")
+	}
+}
+
+func TestRuleService_RemoveRule_LastRuleOfUnlinkedPolicy_RemovesRule(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule != nil {
+		t.Error("expected rule to be removed")
+	}
+}
+
+func TestRuleService_RemoveRule_RuleAmongSeveralInLinkedPolicy_RemovesRule(t *testing.T) {
+	ctx, env, service := arrangeRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	seedRule(t, ctx, env.rules, domain.NewDomainRule("google.com").WithPolicy(env.policyID).Build())
+	linkPolicyToGroup(t, ctx, env)
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: int(seededRule.ID)})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if rule, _ := env.rules.GetByID(ctx, seededRule.ID); rule != nil {
+		t.Error("expected rule to be removed")
+	}
+}
+
 func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 	ctx, env, service := arrangeRuleServiceTest(t)
 	expectedErr := errors.New("failed to query database for rule")
@@ -719,6 +794,89 @@ func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 
 	if err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{PolicyID: env.policyID, ID: 1}); !errors.Is(err, expectedErr) {
 		t.Errorf("expected store error %q, got %q", expectedErr, err)
+	}
+}
+
+// ============================================================================
+// Propagation notifications
+// ============================================================================
+
+func TestRuleService_CreateRule_WithNotifier_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+
+	_, err := service.CreateRule(ctx, schemas.CreateRuleSchema{
+		PolicyID: env.policyID,
+		Type:     domain.DomainRuleType,
+		Value:    "test.com",
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+func TestRuleService_UpdateRule_WhenChanged_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	newValue := "changed.com"
+
+	_, err := service.UpdateRule(ctx, schemas.UpdateRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+		Value:    &newValue,
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
+	}
+}
+
+func TestRuleService_UpdateRule_WhenUnchanged_DoesNotNotify(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+	sameValue := seededRule.Value
+
+	_, err := service.UpdateRule(ctx, schemas.UpdateRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+		Value:    &sameValue,
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if len(*log) != 0 {
+		t.Errorf("expected no notifications, got %v", *log)
+	}
+}
+
+func TestRuleService_RemoveRule_WithNotifier_NotifiesPolicy(t *testing.T) {
+	ctx, env, service, log := arrangeNotifiedRuleServiceTest(t)
+	seededRule := seedRule(t, ctx, env.rules,
+		domain.NewDomainRule("test.com").WithPolicy(env.policyID).Build())
+
+	err := service.RemoveRule(ctx, schemas.RemoveRuleSchema{
+		PolicyID: env.policyID,
+		ID:       int(seededRule.ID),
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	if !logEquals(log, "notify_policy") {
+		t.Errorf("expected exactly [notify_policy], got %v", *log)
 	}
 }
 
@@ -731,6 +889,7 @@ func TestRuleService_RemoveRule_WhenStoreFails_RejectsFetch(t *testing.T) {
 type ruleServiceEnv struct {
 	rules    *MockRuleStore
 	policies *MockPolicyStore
+	groups   *MockGroupStore
 	policyID int64
 }
 
@@ -743,6 +902,7 @@ func arrangeRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, ser
 	env := &ruleServiceEnv{
 		rules:    NewMockRuleStore(),
 		policies: NewMockPolicyStore(),
+		groups:   NewMockGroupStore(),
 	}
 
 	seededPolicy, err := env.policies.Create(ctx, "Default Policy", domain.WhitelistPolicyType)
@@ -751,7 +911,21 @@ func arrangeRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, ser
 	}
 
 	env.policyID = seededPolicy.ID
-	return ctx, env, *service.NewRuleService(env.rules, env.policies)
+	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups, nil)
+}
+
+// linkPolicyToGroup creates a group and links it to the seeded policy, so
+// that the policy is in use and the rule guards apply to it.
+func linkPolicyToGroup(t *testing.T, ctx context.Context, env *ruleServiceEnv) {
+	t.Helper()
+
+	if _, err := env.groups.Create(ctx, "lab1"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+
+	if _, err := env.groups.LinkToPolicy(ctx, "lab1", env.policyID); err != nil {
+		t.Fatalf("failed to link group: %v", err)
+	}
 }
 
 // seedRule creates one rule in the mock store and fails the test on error.
@@ -790,4 +964,30 @@ func mapOutputToRule(output schemas.RuleOutputSchema) domain.Rule {
 		Port:      output.Port,
 		CreatedAt: output.CreatedAt,
 	}
+}
+
+// arrangeNotifiedRuleServiceTest initializes a service instance with mocked
+// store providers, a seeded policy to own rules, and a propagation notifier
+// whose calls are recorded in the returned log.
+func arrangeNotifiedRuleServiceTest(t *testing.T) (context.Context, *ruleServiceEnv, service.RuleService, *[]string) {
+	t.Helper()
+
+	ctx := context.Background()
+	env := &ruleServiceEnv{
+		rules:    NewMockRuleStore(),
+		policies: NewMockPolicyStore(),
+		groups:   NewMockGroupStore(),
+	}
+
+	seededPolicy, err := env.policies.Create(ctx, "Default Policy", domain.WhitelistPolicyType)
+	if err != nil {
+		t.Fatalf("failed to seed policy: %v", err)
+	}
+
+	env.policyID = seededPolicy.ID
+
+	var log []string
+	notifier := &MockPropagationNotifier{Log: &log}
+
+	return ctx, env, *service.NewRuleService(env.rules, env.policies, env.groups, notifier), &log
 }

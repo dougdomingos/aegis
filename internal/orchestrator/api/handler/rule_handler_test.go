@@ -360,6 +360,17 @@ func TestRuleHandler_Delete_WithNonExistentRule_ReturnsStatus404(t *testing.T) {
 	assertStatusCode(t, rec, http.StatusNotFound)
 }
 
+func TestRuleHandler_Delete_LastRuleOfLinkedPolicy_ReturnsStatus409(t *testing.T) {
+	mock := &mockRuleService{
+		removeFn: func(_ context.Context, _ schemas.RemoveRuleSchema) error {
+			return ruleErrors.ErrLinkedPolicyLastRule
+		},
+	}
+
+	rec := performRequest(t, setupRuleRouter(t, mock), http.MethodDelete, "/policies/1/rules/1", nil)
+	assertStatusCode(t, rec, http.StatusConflict)
+}
+
 func TestRuleHandler_Delete_WithInvalidRuleID_ReturnsStatus400(t *testing.T) {
 	mock := &mockRuleService{
 		removeFn: func(_ context.Context, _ schemas.RemoveRuleSchema) error {

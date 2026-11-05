@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,14 @@ const (
 	// envStalenessGrace is the environment variable overriding the default
 	// machine staleness grace window.
 	envStalenessGrace = "AEGIS_STALENESS_GRACE"
+
+	// envGRPCAddr is the environment variable holding the address the gRPC
+	// propagation server binds to.
+	envGRPCAddr = "AEGIS_GRPC_ADDR"
+
+	// defaultGRPCAddr is the address the gRPC propagation server binds to when
+	// the environment does not override it.
+	defaultGRPCAddr = ":9090"
 
 	// defaultStalenessGrace is the default duration a machine remains displayed
 	// as CONNECTED after its last heartbeat, covering three consecutive beats of
@@ -72,6 +81,9 @@ type Config struct {
 	// after its last heartbeat.
 	StalenessGrace time.Duration
 
+	// GRPCAddr is the address the gRPC propagation server binds to.
+	GRPCAddr string
+
 	// Machines is the list of accepted machine sources.
 	Machines []Machine
 }
@@ -99,6 +111,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	grpcAddr, err := parseGRPCAddr(os.Getenv(envGRPCAddr))
+	if err != nil {
+		return nil, err
+	}
+
 	machines, err := parseMachines(os.Getenv(envMachines))
 	if err != nil {
 		return nil, err
@@ -113,6 +130,7 @@ func Load() (*Config, error) {
 		SessionSecret:  sessionSecret,
 		SessionTTL:     sessionTTL,
 		StalenessGrace: stalenessGrace,
+		GRPCAddr:       grpcAddr,
 		Machines:       machines,
 	}, nil
 }
@@ -172,6 +190,36 @@ func parseStalenessGrace(raw string) (time.Duration, error) {
 	}
 
 	return grace, nil
+}
+
+// parseGRPCAddr parses the gRPC bind address environment variable, falling
+// back to the default when it is unset. The address must be a valid host:port
+// pair with a non-empty port within [1, 65535].
+func parseGRPCAddr(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultGRPCAddr, nil
+	}
+
+	_, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s value %q: %w", envGRPCAddr, value, err)
+	}
+
+	if port == "" {
+		return "", fmt.Errorf("invalid %s value %q: port must not be empty", envGRPCAddr, value)
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s value %q: port must be a number", envGRPCAddr, value)
+	}
+
+	if number < 1 || number > 65535 {
+		return "", fmt.Errorf("invalid %s value %q: port must be between 1 and 65535", envGRPCAddr, value)
+	}
+
+	return value, nil
 }
 
 // parseMachines reads the accepted machine sources from the CSV file at the

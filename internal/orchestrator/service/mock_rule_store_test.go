@@ -14,9 +14,14 @@ import (
 // Each method also provides an injectable error field for testing scenarios
 // where the store provider fails.
 type MockRuleStore struct {
-	rules    map[int64]*domain.Rule
-	StoreErr error
-	nextID   int64
+	rules       map[int64]*domain.Rule
+	StoreErr    error
+	UpdateCalls int
+	nextID      int64
+
+	// ListHook, when set, runs at the start of List, letting a test interject
+	// between the propagation worker's build steps.
+	ListHook func()
 }
 
 // NewMockRuleStore initializes a new MockRuleStore instance.
@@ -63,6 +68,10 @@ func (mock *MockRuleStore) GetByID(ctx context.Context, id int64) (*domain.Rule,
 
 // List returns all stored rules or returns StoreErr if set.
 func (mock *MockRuleStore) List(ctx context.Context, filter domain.RuleFilter) ([]domain.Rule, error) {
+	if mock.ListHook != nil {
+		mock.ListHook()
+	}
+
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}
@@ -81,6 +90,8 @@ func (mock *MockRuleStore) List(ctx context.Context, filter domain.RuleFilter) (
 
 // Update modifies an existing rule or returns StoreErr if set.
 func (mock *MockRuleStore) Update(ctx context.Context, rule domain.Rule) (*domain.Rule, error) {
+	mock.UpdateCalls++
+
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}
@@ -110,4 +121,20 @@ func (mock *MockRuleStore) Remove(ctx context.Context, id int64) error {
 
 	delete(mock.rules, rule.ID)
 	return nil
+}
+
+// CountByPolicy counts the rules owned by a policy or returns StoreErr if set.
+func (mock *MockRuleStore) CountByPolicy(ctx context.Context, policyID int64) (int64, error) {
+	if mock.StoreErr != nil {
+		return 0, mock.StoreErr
+	}
+
+	var count int64
+	for _, rule := range mock.rules {
+		if rule.PolicyID == policyID {
+			count++
+		}
+	}
+
+	return count, nil
 }

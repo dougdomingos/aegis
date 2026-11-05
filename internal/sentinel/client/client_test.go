@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,10 +16,14 @@ import (
 	"errors"
 
 	sentinelErrors "dougdomingos.com/aegis/internal/common/errors"
+	"dougdomingos.com/aegis/internal/common/propagation"
 	"dougdomingos.com/aegis/internal/sentinel/client"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
+	"dougdomingos.com/aegis/pkg/pb"
 
 	"dougdomingos.com/aegis/internal/common/auth"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 // labKey is the 32-byte shared key used by the client tests.
@@ -300,12 +305,342 @@ func TestClient_Heartbeat_TrailingSlashBaseURL_RequestsExactPath(t *testing.T) {
 	}
 }
 
+func TestClient_New_WithInvalidPropagationAddress_ReturnsError(t *testing.T) {
+	cases := map[string]struct {
+		address string
+	}{
+		"no port":    {address: "10.0.0.5"},
+		"malformed":  {address: "10.0.0.5:9090:1"},
+		"empty port": {address: "10.0.0.5:"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), tc.address, labKey, time.Second, nil)
+			if err == nil {
+				t.Errorf("expected an error for propagation address %q, got nil", tc.address)
+			}
+		})
+	}
+}
+
+func TestClient_Authenticate_WithValidChallenge_PopulatesMachineID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/machines/authenticate/init":
+			fmt.Fprint(w, `{"Nonce":"abc123","ExpiresAt":"2026-10-22T12:00:00Z"}`)
+		case "/machines/authenticate":
+			fmt.Fprint(w, `{"SessionToken":"token-xyz","ExpiresAt":"2026-10-23T12:00:00Z","Machine":{"ID":7,"Name":"lcc1-001","IP":"10.0.1.11","Status":"CONNECTED"}}`)
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	cl := newTestClient(t, server.URL, 2*time.Second)
+
+	session, err := cl.Authenticate(t.Context(), testIdentity)
+	if err != nil {
+		t.Fatalf("client.Authenticate() error = %v, want nil", err)
+	}
+
+	if session.MachineID != 7 {
+		t.Errorf("session.MachineID = %d, want 7", session.MachineID)
+	}
+}
+
+func TestClient_ConnectPropagation_WithToken_SendsAuthorizationMetadata(t *testing.T) {
+	fake, address := startPropagationFake(t)
+
+	cl := newTestClientAtPropagation(t, address, 2*time.Second)
+
+	stream, err := cl.ConnectPropagation(t.Context(), "token-abc")
+	if err != nil {
+		t.Fatalf("client.ConnectPropagation() error = %v, want nil", err)
+	}
+	defer func() { _ = stream.CloseSend() }()
+
+	if got := waitForString(t, fake.authorization, "authorization metadata"); got != "Bearer token-abc" {
+		t.Errorf("authorization = %q, want %q", got, "Bearer token-abc")
+	}
+}
+
+func TestClient_ConnectPropagation_WhenServerSendsPackage_ReturnsWireMessage(t *testing.T) {
+	fake, address := startPropagationFake(t)
+
+	protocol, port := "TCP", int32(443)
+	fake.inbound <- &pb.ServerMessage{
+		Epoch:     "epoch-abc",
+		Sequence:  4,
+		MachineId: 7,
+		Payload: &pb.ServerMessage_Policy{Policy: &pb.PolicyPackage{
+			PolicyId:      9,
+			PolicyName:    "lab-whitelist",
+			PolicyVersion: 2,
+			PolicyType:    propagation.PolicyTypeWhitelist,
+			Rules: []*pb.Rule{
+				{Type: "IP", Value: "10.0.0.1", Protocol: &protocol, Port: &port},
+				{Type: "DOMAIN", Value: "example.com"},
+			},
+		}},
+	}
+
+	cl := newTestClientAtPropagation(t, address, 2*time.Second)
+
+	stream, err := cl.ConnectPropagation(t.Context(), "token-abc")
+	if err != nil {
+		t.Fatalf("client.ConnectPropagation() error = %v, want nil", err)
+	}
+
+	message, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("stream.Recv() error = %v, want the package", err)
+	}
+
+	if message.Epoch != "epoch-abc" || message.Sequence != 4 || message.MachineID != 7 {
+		t.Errorf("envelope = %+v, want epoch-abc/4/7", message)
+	}
+	if message.Kind != propagation.KindPackage {
+		t.Errorf("Kind = %q, want %q", message.Kind, propagation.KindPackage)
+	}
+	if message.PolicyID != 9 || message.PolicyName != "lab-whitelist" || message.PolicyVersion != 2 {
+		t.Errorf("policy metadata = %+v, want 9/lab-whitelist/2", message)
+	}
+	if message.PolicyType != propagation.PolicyTypeWhitelist {
+		t.Errorf("PolicyType = %q, want %q", message.PolicyType, propagation.PolicyTypeWhitelist)
+	}
+	if len(message.Rules) != 2 {
+		t.Fatalf("Rules = %d, want 2", len(message.Rules))
+	}
+	if message.Rules[0].Protocol == nil || *message.Rules[0].Protocol != "TCP" {
+		t.Errorf("IP rule protocol = %v, want TCP", message.Rules[0].Protocol)
+	}
+	if message.Rules[0].Port == nil || *message.Rules[0].Port != 443 {
+		t.Errorf("IP rule port = %v, want 443", message.Rules[0].Port)
+	}
+	if message.Rules[1].Protocol != nil || message.Rules[1].Port != nil {
+		t.Errorf("domain rule optional fields = %v/%v, want nil/nil", message.Rules[1].Protocol, message.Rules[1].Port)
+	}
+}
+
+func TestClient_ConnectPropagation_WhenServerSendsRevoke_ReturnsRevokeMessage(t *testing.T) {
+	fake, address := startPropagationFake(t)
+
+	fake.inbound <- &pb.ServerMessage{
+		Epoch:     "epoch-abc",
+		Sequence:  5,
+		MachineId: 7,
+		Payload:   &pb.ServerMessage_Revoke{Revoke: &pb.Revoke{}},
+	}
+
+	cl := newTestClientAtPropagation(t, address, 2*time.Second)
+
+	stream, err := cl.ConnectPropagation(t.Context(), "token-abc")
+	if err != nil {
+		t.Fatalf("client.ConnectPropagation() error = %v, want nil", err)
+	}
+
+	message, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("stream.Recv() error = %v, want the revoke", err)
+	}
+
+	if message.Kind != propagation.KindRevoke {
+		t.Errorf("Kind = %q, want %q", message.Kind, propagation.KindRevoke)
+	}
+	if len(message.Rules) != 0 || message.PolicyID != 0 {
+		t.Errorf("revoke message = %+v, want empty policy and rules", message)
+	}
+}
+
+func TestClient_ConnectPropagation_WhenAckSent_ConvertsStatus(t *testing.T) {
+	fake, address := startPropagationFake(t)
+
+	cl := newTestClientAtPropagation(t, address, 2*time.Second)
+
+	stream, err := cl.ConnectPropagation(t.Context(), "token-abc")
+	if err != nil {
+		t.Fatalf("client.ConnectPropagation() error = %v, want nil", err)
+	}
+
+	cases := []struct {
+		ack        propagation.Ack
+		wantStatus pb.AckStatus
+	}{
+		{ack: propagation.Ack{Sequence: 4, Status: propagation.AckAcked}, wantStatus: pb.AckStatus_ACK_STATUS_ACKED},
+		{ack: propagation.Ack{Sequence: 5, Status: propagation.AckNacked, Reason: "stale sequence"}, wantStatus: pb.AckStatus_ACK_STATUS_NACKED},
+	}
+
+	for _, tc := range cases {
+		if err := stream.Send(tc.ack); err != nil {
+			t.Fatalf("stream.Send(%+v) error = %v, want nil", tc.ack, err)
+		}
+
+		received := waitForAck(t, fake.acks, "acknowledgement")
+		if received.Sequence != tc.ack.Sequence {
+			t.Errorf("Sequence = %d, want %d", received.Sequence, tc.ack.Sequence)
+		}
+		if received.Status != tc.wantStatus {
+			t.Errorf("Status = %v, want %v", received.Status, tc.wantStatus)
+		}
+		if received.Reason != tc.ack.Reason {
+			t.Errorf("Reason = %q, want %q", received.Reason, tc.ack.Reason)
+		}
+	}
+}
+
+func TestClient_Close_ClosesConnection(t *testing.T) {
+	_, address := startPropagationFake(t)
+
+	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, 2*time.Second, nil)
+	if err != nil {
+		t.Fatalf("client.New() error = %v, want nil", err)
+	}
+
+	if err := cl.Close(); err != nil {
+		t.Fatalf("client.Close() error = %v, want nil", err)
+	}
+
+	if _, err := cl.ConnectPropagation(t.Context(), "token-abc"); err == nil {
+		t.Error("client.ConnectPropagation() after Close = nil, want an error")
+	}
+}
+
+// ============================================================================
+// Propagation gRPC test fake
+// ============================================================================
+
+// propagationFake implements pb.PropagationServer for client tests: it records
+// the authorization metadata of every connection, sends the messages queued on
+// inbound, and records every received acknowledgement.
+type propagationFake struct {
+	pb.UnimplementedPropagationServer
+
+	authorization chan string
+	inbound       chan *pb.ServerMessage
+	acks          chan *pb.Ack
+}
+
+func newPropagationFake() *propagationFake {
+	return &propagationFake{
+		authorization: make(chan string, 8),
+		inbound:       make(chan *pb.ServerMessage, 8),
+		acks:          make(chan *pb.Ack, 8),
+	}
+}
+
+// Connect accepts one stream, publishing its authorization metadata, draining
+// queued messages, and recording received acknowledgements until it ends.
+func (fake *propagationFake) Connect(stream pb.Propagation_ConnectServer) error {
+	incoming, _ := metadata.FromIncomingContext(stream.Context())
+	fake.authorization <- strings.Join(incoming.Get("authorization"), ",")
+
+	for {
+		select {
+		case message := <-fake.inbound:
+			if err := stream.Send(message); err != nil {
+				return err
+			}
+
+			continue
+		default:
+		}
+
+		ack, err := stream.Recv()
+		if err != nil {
+			return nil
+		}
+
+		fake.acks <- ack
+	}
+}
+
+// startPropagationFake serves a fake propagation server on a free local port
+// and returns it with its address.
+func startPropagationFake(t *testing.T) (*propagationFake, string) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to bind test listener: %v", err)
+	}
+
+	fake := newPropagationFake()
+	grpcServer := grpc.NewServer(
+		grpc.MaxRecvMsgSize(16<<20),
+		grpc.MaxSendMsgSize(16<<20),
+	)
+	pb.RegisterPropagationServer(grpcServer, fake)
+
+	go func() {
+		if err := grpcServer.Serve(listener); err != nil {
+			t.Logf("propagation fake stopped: %v", err)
+		}
+	}()
+
+	t.Cleanup(func() {
+		grpcServer.Stop()
+	})
+
+	return fake, listener.Addr().String()
+}
+
+// newTestClientAtPropagation builds a client whose propagation channel points
+// at the provided gRPC address, closing it on cleanup.
+func newTestClientAtPropagation(t *testing.T, address string, timeout time.Duration) *client.Client {
+	t.Helper()
+
+	cl, err := client.New(mustParseURL(t, "http://127.0.0.1:1"), address, labKey, timeout, nil)
+	if err != nil {
+		t.Fatalf("client.New() error = %v, want nil", err)
+	}
+
+	t.Cleanup(func() { _ = cl.Close() })
+
+	return cl
+}
+
+// waitForString receives one value from the channel or fails the test.
+func waitForString(t *testing.T, channel chan string, what string) string {
+	t.Helper()
+
+	select {
+	case value := <-channel:
+		return value
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		return ""
+	}
+}
+
+// waitForAck receives one value from the channel or fails the test.
+func waitForAck(t *testing.T, channel chan *pb.Ack, what string) *pb.Ack {
+	t.Helper()
+
+	select {
+	case ack := <-channel:
+		return ack
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+		return nil
+	}
+}
+
 // newTestClient builds a client pointing at the provided server URL, using a
-// fixed lab key and a short timeout.
+// fixed lab key and a short timeout. The propagation address points at a port
+// where no server listens: gRPC connections are lazy, so it only matters for
+// tests that actually open a propagation stream.
 func newTestClient(t *testing.T, serverURL string, timeout time.Duration) *client.Client {
 	t.Helper()
 
-	return client.New(mustParseURL(t, serverURL), labKey, timeout, nil)
+	cl, err := client.New(mustParseURL(t, serverURL), "127.0.0.1:1", labKey, timeout, nil)
+	if err != nil {
+		t.Fatalf("client.New() error = %v, want nil", err)
+	}
+
+	t.Cleanup(func() { _ = cl.Close() })
+
+	return cl
 }
 
 // mustParseURL parses the provided URL, failing the test on a malformed value.

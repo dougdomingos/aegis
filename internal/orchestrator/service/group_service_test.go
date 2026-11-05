@@ -466,10 +466,11 @@ func TestGroupService_ListAllGroups_WithLinkedMachines_IncludesMachineIDs(t *tes
 // LinkPolicy & UnlinkPolicy
 // ============================================================================
 
-func TestGroupService_LinkPolicy_WithValidGroupAndPolicy_LinksPolicy(t *testing.T) {
-	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+func TestGroupService_LinkPolicy_WithPolicyWithRules_LinksPolicy(t *testing.T) {
+	ctx, groupStore, policyStore, ruleStore, svc := arrangeGroupPolicyServiceTest(t)
 	group, _ := groupStore.Create(ctx, "lab1")
 	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("test.com").WithPolicy(policy.ID).Build())
 
 	res, err := svc.LinkPolicy(ctx, "lab1", "default")
 
@@ -487,8 +488,41 @@ func TestGroupService_LinkPolicy_WithValidGroupAndPolicy_LinksPolicy(t *testing.
 	}
 }
 
+func TestGroupService_LinkPolicy_WithPolicyWithoutRules_ReturnsErrPolicyHasNoRules(t *testing.T) {
+	ctx, groupStore, policyStore, _, svc := arrangeGroupPolicyServiceTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	_, _ = policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+
+	_, err := svc.LinkPolicy(ctx, "lab1", "default")
+
+	if !errors.Is(err, groupErrors.ErrPolicyHasNoRules) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrPolicyHasNoRules, err)
+	}
+	if group.PolicyID != nil {
+		t.Errorf("expected group not to be linked, got policy id %d", *group.PolicyID)
+	}
+}
+
+func TestGroupService_LinkPolicy_CurrentPolicyWithoutRules_ReturnsErrPolicyHasNoRules(t *testing.T) {
+	ctx, groupStore, policyStore, ruleStore, svc := arrangeGroupPolicyServiceTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	rule := seedRule(t, ctx, ruleStore, domain.NewDomainRule("test.com").WithPolicy(policy.ID).Build())
+	_, _ = svc.LinkPolicy(ctx, "lab1", "default")
+	_ = ruleStore.Remove(ctx, rule.ID)
+
+	_, err := svc.LinkPolicy(ctx, "lab1", "default")
+
+	if !errors.Is(err, groupErrors.ErrPolicyHasNoRules) {
+		t.Errorf("expected %v, got %v", groupErrors.ErrPolicyHasNoRules, err)
+	}
+	if group.PolicyID == nil || *group.PolicyID != policy.ID {
+		t.Errorf("expected group to keep its previous policy %d, got %v", policy.ID, group.PolicyID)
+	}
+}
+
 func TestGroupService_LinkPolicy_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
-	ctx, _, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, _, policyStore, _, svc := arrangeGroupPolicyServiceTest(t)
 	_, _ = policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
 
 	_, err := svc.LinkPolicy(ctx, "unknown", "default")
@@ -499,7 +533,7 @@ func TestGroupService_LinkPolicy_WithInexistentGroup_ReturnsErrGroupNotFound(t *
 }
 
 func TestGroupService_LinkPolicy_WithInexistentPolicy_ReturnsErrPolicyNotFound(t *testing.T) {
-	ctx, groupStore, _, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, groupStore, _, _, svc := arrangeGroupPolicyServiceTest(t)
 	_, _ = groupStore.Create(ctx, "lab1")
 
 	_, err := svc.LinkPolicy(ctx, "lab1", "unknown")
@@ -510,10 +544,12 @@ func TestGroupService_LinkPolicy_WithInexistentPolicy_ReturnsErrPolicyNotFound(t
 }
 
 func TestGroupService_LinkPolicy_WithExistingPolicy_ReplacesPolicy(t *testing.T) {
-	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, groupStore, policyStore, ruleStore, svc := arrangeGroupPolicyServiceTest(t)
 	_, _ = groupStore.Create(ctx, "lab1")
 	first, _ := policyStore.Create(ctx, "first", domain.WhitelistPolicyType)
 	second, _ := policyStore.Create(ctx, "second", domain.BlacklistPolicyType)
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("first.com").WithPolicy(first.ID).Build())
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("second.com").WithPolicy(second.ID).Build())
 	_, _ = svc.LinkPolicy(ctx, "lab1", "first")
 
 	res, err := svc.LinkPolicy(ctx, "lab1", "second")
@@ -531,9 +567,10 @@ func TestGroupService_LinkPolicy_WithExistingPolicy_ReplacesPolicy(t *testing.T)
 }
 
 func TestGroupService_UnlinkPolicy_WithLinkedGroup_ClearsPolicy(t *testing.T) {
-	ctx, groupStore, policyStore, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, groupStore, policyStore, ruleStore, svc := arrangeGroupPolicyServiceTest(t)
 	_, _ = groupStore.Create(ctx, "lab1")
-	_, _ = policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("test.com").WithPolicy(policy.ID).Build())
 	_, _ = svc.LinkPolicy(ctx, "lab1", "default")
 
 	res, err := svc.UnlinkPolicy(ctx, "lab1")
@@ -550,7 +587,7 @@ func TestGroupService_UnlinkPolicy_WithLinkedGroup_ClearsPolicy(t *testing.T) {
 }
 
 func TestGroupService_UnlinkPolicy_WithUnlinkedGroup_ReturnsErrGroupNotLinkedToPolicy(t *testing.T) {
-	ctx, groupStore, _, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, groupStore, _, _, svc := arrangeGroupPolicyServiceTest(t)
 	_, _ = groupStore.Create(ctx, "lab1")
 
 	_, err := svc.UnlinkPolicy(ctx, "lab1")
@@ -561,12 +598,152 @@ func TestGroupService_UnlinkPolicy_WithUnlinkedGroup_ReturnsErrGroupNotLinkedToP
 }
 
 func TestGroupService_UnlinkPolicy_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
-	ctx, _, _, svc := arrangeGroupPolicyServiceTest(t)
+	ctx, _, _, _, svc := arrangeGroupPolicyServiceTest(t)
 
 	_, err := svc.UnlinkPolicy(ctx, "unknown")
 
 	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
 		t.Errorf("expected %v, got %v", groupErrors.ErrGroupNotFound, err)
+	}
+}
+
+// ============================================================================
+// Propagation notifications
+// ============================================================================
+
+func TestGroupService_LinkMachine_WithNotifier_NotifiesMachine(t *testing.T) {
+	ctx, groupStore, machineStore, svc, _, log := arrangeNotifiedGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	_, err := svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !logEquals(log, "notify_machine") {
+		t.Errorf("expected exactly [notify_machine], got %v", *log)
+	}
+}
+
+func TestGroupService_UnlinkMachine_WithNotifier_NotifiesMachine(t *testing.T) {
+	ctx, groupStore, machineStore, svc, _, log := arrangeNotifiedGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	_, _ = svc.LinkMachine(ctx, "lab1", machine.ID)
+
+	*log = (*log)[:0]
+
+	_, err := svc.UnlinkMachine(ctx, "lab1", machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !logEquals(log, "notify_machine") {
+		t.Errorf("expected exactly [notify_machine], got %v", *log)
+	}
+}
+
+func TestGroupService_LinkPolicy_WithNotifier_NotifiesGroup(t *testing.T) {
+	ctx, groupStore, policyStore, ruleStore, svc, log := arrangeNotifiedGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("test.com").WithPolicy(policy.ID).Build())
+
+	_, err := svc.LinkPolicy(ctx, "lab1", "default")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !logEquals(log, "notify_group") {
+		t.Errorf("expected exactly [notify_group], got %v", *log)
+	}
+}
+
+func TestGroupService_UnlinkPolicy_WithNotifier_NotifiesGroup(t *testing.T) {
+	ctx, groupStore, policyStore, ruleStore, svc, log := arrangeNotifiedGroupPolicyServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	policy, _ := policyStore.Create(ctx, "default", domain.WhitelistPolicyType)
+	seedRule(t, ctx, ruleStore, domain.NewDomainRule("test.com").WithPolicy(policy.ID).Build())
+	_, _ = svc.LinkPolicy(ctx, "lab1", "default")
+
+	*log = (*log)[:0]
+
+	_, err := svc.UnlinkPolicy(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !logEquals(log, "notify_group") {
+		t.Errorf("expected exactly [notify_group], got %v", *log)
+	}
+}
+
+func TestGroupService_RemoveGroup_ResolvesBeforeDeleteAndRevokesAfter(t *testing.T) {
+	ctx, groupStore, _, svc, notifier, log := arrangeNotifiedGroupMachineServiceTest(t)
+	group, _ := groupStore.Create(ctx, "lab1")
+	notifier.GroupMachineIDs = []int64{7, 8}
+
+	err := svc.RemoveGroup(ctx, schemas.RemoveGroupSchema{Name: "lab1"})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if !logEquals(log, "resolve", "remove", "revoke") {
+		t.Errorf("expected [resolve remove revoke], got %v", *log)
+	}
+
+	if len(notifier.RevokedMachineIDs) != 2 {
+		t.Errorf("expected the resolved machine IDs to be revoked, got %v", notifier.RevokedMachineIDs)
+	}
+	if notifier.RevokedPolicy != nil {
+		t.Errorf("expected no policy on a group removal revoke, got %+v", notifier.RevokedPolicy)
+	}
+
+	if remaining, _ := groupStore.GetByName(ctx, group.Name); remaining != nil {
+		t.Errorf("expected group to be deleted, got %+v", remaining)
+	}
+}
+
+func TestGroupService_RemoveGroup_WhenResolveFails_DoesNotDelete(t *testing.T) {
+	ctx, groupStore, _, svc, notifier, log := arrangeNotifiedGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	notifier.ResolveGroupMachinesErr = errors.New("resolver unavailable")
+
+	err := svc.RemoveGroup(ctx, schemas.RemoveGroupSchema{Name: "lab1"})
+
+	if err == nil {
+		t.Fatal("expected an error when resolution fails, got nil")
+	}
+
+	if !logEquals(log, "resolve") {
+		t.Errorf("expected [resolve] only, got %v", *log)
+	}
+
+	if remaining, _ := groupStore.GetByName(ctx, "lab1"); remaining == nil {
+		t.Error("expected the group to survive a failed resolution")
+	}
+}
+
+func TestGroupService_RemoveGroup_WhenDeleteFails_DoesNotRevoke(t *testing.T) {
+	ctx, groupStore, _, svc, notifier, log := arrangeNotifiedGroupMachineServiceTest(t)
+	_, _ = groupStore.Create(ctx, "lab1")
+	notifier.GroupMachineIDs = []int64{7, 8}
+	groupStore.RemoveErr = errors.New("database unavailable")
+
+	err := svc.RemoveGroup(ctx, schemas.RemoveGroupSchema{Name: "lab1"})
+
+	if err == nil {
+		t.Fatal("expected an error when the delete fails, got nil")
+	}
+
+	if !logEquals(log, "resolve", "remove") {
+		t.Errorf("expected [resolve remove] with no revoke, got %v", *log)
 	}
 }
 
@@ -590,22 +767,64 @@ func arrangeGroupMachineServiceTest(t *testing.T) (context.Context, *MockGroupSt
 	groupStore := NewMockGroupStore()
 	machineStore := NewMockMachineStore()
 	policyStore := NewMockPolicyStore()
+	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, time.Minute, now)
 
 	return context.Background(), groupStore, machineStore, *svc
 }
 
 // arrangeGroupPolicyServiceTest initializes a new group service instance with
-// mocked group and policy store providers.
-func arrangeGroupPolicyServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockPolicyStore, service.GroupService) {
+// mocked group, policy and rule store providers.
+func arrangeGroupPolicyServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockPolicyStore, *MockRuleStore, service.GroupService) {
 	t.Helper()
 
 	groupStore := NewMockGroupStore()
 	machineStore := NewMockMachineStore()
 	policyStore := NewMockPolicyStore()
+	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, time.Minute, now)
 
-	return context.Background(), groupStore, policyStore, *svc
+	return context.Background(), groupStore, policyStore, ruleStore, *svc
+}
+
+// arrangeNotifiedGroupMachineServiceTest initializes a group service with
+// mocked group and machine stores, a propagation notifier, and a shared call
+// log wired into both the notifier and the group store's Remove.
+func arrangeNotifiedGroupMachineServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockMachineStore, service.GroupService, *MockPropagationNotifier, *[]string) {
+	t.Helper()
+
+	var log []string
+	notifier := &MockPropagationNotifier{Log: &log}
+
+	groupStore := NewMockGroupStore()
+	groupStore.RemoveLog = &log
+
+	machineStore := NewMockMachineStore()
+	policyStore := NewMockPolicyStore()
+	ruleStore := NewMockRuleStore()
+	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, notifier, time.Minute, now)
+
+	return context.Background(), groupStore, machineStore, *svc, notifier, &log
+}
+
+// arrangeNotifiedGroupPolicyServiceTest initializes a group service with
+// mocked group, policy and rule stores, a propagation notifier, and a shared
+// call log.
+func arrangeNotifiedGroupPolicyServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockPolicyStore, *MockRuleStore, service.GroupService, *[]string) {
+	t.Helper()
+
+	var log []string
+	notifier := &MockPropagationNotifier{Log: &log}
+
+	groupStore := NewMockGroupStore()
+	machineStore := NewMockMachineStore()
+	policyStore := NewMockPolicyStore()
+	ruleStore := NewMockRuleStore()
+	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, notifier, time.Minute, now)
+
+	return context.Background(), groupStore, policyStore, ruleStore, *svc, &log
 }
