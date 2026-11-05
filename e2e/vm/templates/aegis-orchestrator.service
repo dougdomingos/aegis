@@ -1,0 +1,13 @@
+[Unit]
+Description=Aegis Orchestrator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/aegis/orchestrator.env
+ExecStart=/usr/local/bin/aegis-orchestrator
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

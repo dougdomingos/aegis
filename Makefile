@@ -1,4 +1,4 @@
-.PHONY: init proto tests coverage test-report e2e build help
+.PHONY: init proto tests coverage test-report e2e vm-up vm-test vm-down vm-clean build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
@@ -56,7 +56,20 @@ test-report: proto ## Run all tests and yield report as HTML
 	@go test -v -json -coverprofile=coverage.out $(TEST_PACKAGES) | test-prettify --cov-prof coverage.out
 
 e2e: proto ## Run the end-to-end suite with Testcontainers (requires Docker)
-	@go test -tags e2e -timeout 30m -v ./e2e/...
+	@go test -tags e2e -timeout 30m -v ./e2e/containers/...
+
+vm-up: ## Provision the KVM lab (first run downloads and builds the base image)
+	@e2e/vm/scripts/up.sh
+
+vm-test: proto ## Run the filtering suite against the KVM lab
+	@e2e/vm/scripts/check-build.sh
+	@go test -tags vm -count=1 -p 1 -timeout 30m -v ./e2e/vm/...
+
+vm-down: ## Remove the KVM lab, keeping the cached base image
+	@e2e/vm/scripts/down.sh
+
+vm-clean: ## Remove the KVM lab, the base image and the storage pool
+	@e2e/vm/scripts/clean.sh
 
 help: ## Show help for each make command
 	@echo 'Makefile commands:'

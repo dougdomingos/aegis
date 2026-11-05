@@ -1,0 +1,11 @@
+#cloud-config
+package_update: true
+packages: [nftables, curl, dnsmasq, python3, dnsutils, libnss3-tools]
+runcmd:
+  - systemctl disable --now dnsmasq
+  - curl -fL --retry 3 -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  - apt-get install -y /tmp/chrome.deb
+  - rm -f /tmp/chrome.deb
+power_state:
+  mode: poweroff
+  condition: dpkg -s nftables curl dnsmasq python3 dnsutils libnss3-tools google-chrome-stable
