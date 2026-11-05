@@ -138,7 +138,12 @@ func (mock *MockMachineStore) Touch(ctx context.Context, id int64, mac string, s
 }
 
 // GetByID retrieves a machine by its unique ID or returns StoreErr if set.
+// A cancelled context fails the read, mirroring the real store.
 func (mock *MockMachineStore) GetByID(ctx context.Context, id int64) (*domain.Machine, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}

@@ -18,6 +18,10 @@ type MockRuleStore struct {
 	StoreErr    error
 	UpdateCalls int
 	nextID      int64
+
+	// ListHook, when set, runs at the start of List, letting a test interject
+	// between the propagation worker's build steps.
+	ListHook func()
 }
 
 // NewMockRuleStore initializes a new MockRuleStore instance.
@@ -64,6 +68,10 @@ func (mock *MockRuleStore) GetByID(ctx context.Context, id int64) (*domain.Rule,
 
 // List returns all stored rules or returns StoreErr if set.
 func (mock *MockRuleStore) List(ctx context.Context, filter domain.RuleFilter) ([]domain.Rule, error) {
+	if mock.ListHook != nil {
+		mock.ListHook()
+	}
+
 	if mock.StoreErr != nil {
 		return nil, mock.StoreErr
 	}

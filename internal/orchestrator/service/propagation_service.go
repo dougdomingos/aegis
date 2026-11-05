@@ -18,12 +18,6 @@ import (
 // one unresponsive machine cannot block the whole fleet.
 const sendTimeout = 10 * time.Second
 
-// MessageSender delivers one propagation message to a connected machine over
-// its stream.
-type MessageSender interface {
-	Send(ctx context.Context, message propagation.Message) error
-}
-
 // propagationIntent is the queued desire for one machine: a package rebuilt
 // from the current state, or an explicit revoke carrying optional policy
 // metadata for the audit row.
@@ -36,7 +30,7 @@ type propagationIntent struct {
 // registered it, so a newer stream replaces the previous one safely.
 type registeredSender struct {
 	id     uint64
-	sender MessageSender
+	sender propagation.MessageSender
 }
 
 // builtMessage couples the wire message with the policy metadata recorded in
@@ -116,10 +110,11 @@ func (service *PropagationService) Start(ctx context.Context) error {
 	return nil
 }
 
-// Register stores the sender for the machine, returning the connection ID that
-// scopes a later Unregister. Unknown machines return ErrMachineNotFound.
-func (service *PropagationService) Register(machineID int64, sender MessageSender) (uint64, error) {
-	machine, err := service.machines.GetByID(context.Background(), machineID)
+// Register verifies the machine and stores its sender, returning the
+// connection ID that scopes a later Unregister. The provided context bounds
+// the verification read; unknown machines return ErrMachineNotFound.
+func (service *PropagationService) Register(ctx context.Context, machineID int64, sender propagation.MessageSender) (uint64, error) {
+	machine, err := service.machines.GetByID(ctx, machineID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to verify machine %d for registration: %w", machineID, err)
 	}
@@ -299,8 +294,9 @@ func (service *PropagationService) run(ctx context.Context) {
 }
 
 // dispatch builds, records, and sends the message for one pending intent. A
-// machine without a registered sender is skipped without an audit row, and a
-// message is never sent before its row is marked SENT.
+// machine without a registered sender — or one that reconnected while the
+// message was being built — is skipped without an audit row, and a message is
+// never sent before its row is marked SENT.
 func (service *PropagationService) dispatch(ctx context.Context, machineID int64, intent propagationIntent) {
 	service.mu.Lock()
 	registered, exists := service.senders[machineID]
@@ -317,6 +313,17 @@ func (service *PropagationService) dispatch(ctx context.Context, machineID int64
 	}
 
 	if built == nil {
+		return
+	}
+
+	// The machine may have reconnected while the message was being built:
+	// the new stream's own snapshot supersedes this intent, so a stale
+	// sender is dropped before any audit row is written.
+	service.mu.Lock()
+	current, stillRegistered := service.senders[machineID]
+	service.mu.Unlock()
+
+	if !stillRegistered || current.id != registered.id {
 		return
 	}
 

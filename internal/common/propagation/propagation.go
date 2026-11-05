@@ -2,6 +2,8 @@
 // the Orchestrator and the Sentinel for rule distribution.
 package propagation
 
+import "context"
+
 // Kind distinguishes the two propagation messages a machine can receive.
 type Kind string
 
@@ -68,4 +70,11 @@ type Stream interface {
 	Recv() (*Message, error)
 	Send(ack Ack) error
 	CloseSend() error
+}
+
+// MessageSender delivers one propagation message to a connected machine over
+// its stream. It is implemented by the API adapters that own the transport
+// and consumed by the service that schedules deliveries.
+type MessageSender interface {
+	Send(ctx context.Context, message Message) error
 }

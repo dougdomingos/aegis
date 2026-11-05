@@ -373,11 +373,11 @@ func TestPropagationService_Register_AfterReconnect_OldUnregisterIsNoop(t *testi
 	machine, _ := fixture.completeMachine("10.0.0.1")
 	first, second := newFakeSender(), newFakeSender()
 
-	firstID, err := fixture.service.Register(machine.ID, first)
+	firstID, err := fixture.service.Register(fixture.ctx, machine.ID, first)
 	if err != nil {
 		t.Fatalf("Register() = %v, want nil", err)
 	}
-	secondID, err := fixture.service.Register(machine.ID, second)
+	secondID, err := fixture.service.Register(fixture.ctx, machine.ID, second)
 	if err != nil {
 		t.Fatalf("Register() = %v, want nil", err)
 	}
@@ -395,6 +395,56 @@ func TestPropagationService_Register_AfterReconnect_OldUnregisterIsNoop(t *testi
 		t.Errorf("MachineID = %d, want %d", message.MachineID, machine.ID)
 	}
 	assertNoSend(t, first.sent)
+}
+
+func TestPropagationService_Register_WithCancelledContext_ReturnsError(t *testing.T) {
+	fixture := arrangePropagationServiceTest(t)
+
+	machine := fixture.addMachine("10.0.0.1")
+
+	ctx, cancel := context.WithCancel(fixture.ctx)
+	cancel()
+
+	if _, err := fixture.service.Register(ctx, machine.ID, newFakeSender()); err == nil {
+		t.Fatal("Register() = nil, want the cancelled-context error")
+	}
+}
+
+func TestPropagationService_DeliverSnapshot_WhenReconnectDuringBuild_SkipsSupersededDelivery(t *testing.T) {
+	fixture := arrangePropagationServiceTest(t)
+
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	control, _ := fixture.completeMachine("10.0.0.2")
+	stale := fixture.register(machine.ID)
+	controlSender := fixture.register(control.ID)
+	fixture.start()
+
+	// Re-register the machine while the worker is mid-build: the newer
+	// stream's own snapshot supersedes the in-flight intent.
+	building := make(chan struct{})
+	fresh := newFakeSender()
+	fixture.rules.ListHook = func() {
+		fixture.rules.ListHook = nil
+		close(building)
+
+		if _, err := fixture.service.Register(fixture.ctx, machine.ID, fresh); err != nil {
+			fixture.t.Errorf("Register() = %v, want nil", err)
+		}
+	}
+
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	<-building
+
+	// The worker is single-threaded: the row exists before the send, so once
+	// the control machine's message arrived, the superseded dispatch finished.
+	fixture.service.NotifyMachine(fixture.ctx, control.ID)
+	waitForSend(t, controlSender.sent)
+
+	if row, exists := fixture.propagations.RowAt(machine.ID, 1); exists {
+		t.Errorf("RowAt(%d, 1) = %+v, want no audit row for the superseded delivery", machine.ID, row)
+	}
+	assertNoSend(t, stale.sent)
+	assertNoSend(t, fresh.sent)
 }
 
 func TestPropagationService_Acknowledge_WithForeignSequence_LeavesRowsUntouched(t *testing.T) {
@@ -469,8 +519,8 @@ func TestPropagationService_RevokeMachines_WithPolicy_RecordsPolicyMetadata(t *t
 // Fixtures and helpers
 // ============================================================================
 
-// fakeSender is a service.MessageSender that records delivered messages and
-// can be configured to fail.
+// fakeSender is a propagation.MessageSender that records delivered messages
+// and can be configured to fail.
 type fakeSender struct {
 	sent chan propagation.Message
 	Err  error
@@ -541,7 +591,7 @@ func (fixture *propagationFixture) register(machineID int64) *fakeSender {
 	fixture.t.Helper()
 
 	sender := newFakeSender()
-	if _, err := fixture.service.Register(machineID, sender); err != nil {
+	if _, err := fixture.service.Register(fixture.ctx, machineID, sender); err != nil {
 		fixture.t.Fatalf("Register(%d) = %v, want nil", machineID, err)
 	}
 
