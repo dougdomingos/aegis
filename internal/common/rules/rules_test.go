@@ -24,6 +24,28 @@ func TestRules_Validate_WithValidIPRule_ReturnsNil(t *testing.T) {
 	}
 }
 
+func TestRules_Validate_WithIPRuleVariations_ReturnsExpectedResult(t *testing.T) {
+	testCases := map[string]struct {
+		value   string
+		wantErr error
+	}{
+		"ipv4 cidr":             {value: "10.0.0.0/8", wantErr: nil},
+		"ipv6 cidr":             {value: "2001:db8::/32", wantErr: nil},
+		"cidr prefix too large": {value: "10.0.0.0/33", wantErr: ruleErrors.ErrMalformedRuleValue},
+		"single ip":             {value: "10.0.0.1", wantErr: nil},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			rule := rules.Rule{Type: "IP", Value: tc.value}
+			err := rules.Validate(rule)
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("Validate(%+v) = %v, want %v", rule, err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestRules_Validate_WithMissingType_ReturnsErrRuleTypeRequired(t *testing.T) {
 	testCases := map[string]struct {
 		rule rules.Rule
