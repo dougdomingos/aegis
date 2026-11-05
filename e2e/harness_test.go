@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dougdomingos.com/aegis/internal/common/schemas"
+	mobycontainer "github.com/moby/moby/api/types/container"
 	mobynetwork "github.com/moby/moby/api/types/network"
 	"github.com/testcontainers/testcontainers-go"
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"
@@ -71,6 +72,16 @@ const (
 	imageRepo = "aegis-e2e"
 	imageTag  = "test"
 )
+
+// resolvableDomains are network aliases of the Orchestrator. Docker's embedded
+// DNS answers them with the Orchestrator address, giving the filtering
+// scenarios real names to resolve without reaching the internet.
+var resolvableDomains = []string{"allowed.test", "blocked.test"}
+
+// dockerEmbeddedDNS is the resolver Docker serves inside user-defined
+// networks. It is the Sentinel's explicit DNS upstream, since the default
+// derivation skips loopback nameservers.
+const dockerEmbeddedDNS = "127.0.0.11"
 
 // e2eImage is the reference (repo:tag) of the image built by TestMain.
 var e2eImage string
@@ -183,7 +194,7 @@ func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) tes
 		testcontainers.WithExposedPorts(orchestratorPort, orchestratorGRPCPort),
 		testcontainers.WithWaitStrategyAndDeadline(readyTimeout,
 			wait.ForHTTP("/machines").WithPort(orchestratorPort)),
-		tcnetwork.WithNetwork(nil, f.network),
+		tcnetwork.WithNetwork(resolvableDomains, f.network),
 		withStaticIP(f.network.Name, orchestratorIP),
 	)
 	if err != nil {
@@ -299,8 +310,8 @@ func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string, opts ..
 	}
 
 	config := fmt.Sprintf(
-		`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q, "propagation_address": "%s:9090", "rules_state_path": %q%s}`,
-		orchestratorIP, labKeyPath, orchestratorIP, rulesStatePath, interval)
+		`{"orchestrator_url": "http://%s:8080", "lab_key_path": %q, "propagation_address": "%s:9090", "rules_state_path": %q, "dns_upstream_servers": [%q]%s}`,
+		orchestratorIP, labKeyPath, orchestratorIP, rulesStatePath, dockerEmbeddedDNS, interval)
 
 	c, err := testcontainers.Run(context.Background(), e2eImage,
 		testcontainers.WithEntrypoint("/usr/local/bin/aegis-sentinel", "--config", sentinelConfigPath),
@@ -308,6 +319,9 @@ func (f *fleet) startSentinel(t *testing.T, index int, labKeyHex string, opts ..
 			injectedFile(labKeyPath, labKeyHex+"\n"),
 			injectedFile(sentinelConfigPath, config),
 		),
+		testcontainers.WithHostConfigModifier(func(hc *mobycontainer.HostConfig) {
+			hc.CapAdd = append(hc.CapAdd, "NET_ADMIN")
+		}),
 		tcnetwork.WithNetwork(nil, f.network),
 		withStaticIP(f.network.Name, sentinelIP(index)),
 	)
