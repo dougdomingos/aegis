@@ -62,8 +62,18 @@ type Client struct {
 }
 
 // New creates a Client for the Orchestrator API at the provided base URL and
-// gRPC propagation address.
-func New(baseURL *url.URL, propagationAddress string, labKey []byte, timeout time.Duration, logger *slog.Logger) (*Client, error) {
+// gRPC propagation address. Hostnames are resolved through resolver for both
+// the REST and the gRPC connections; a nil resolver uses the system resolver.
+func New(baseURL *url.URL, propagationAddress string, labKey []byte, timeout time.Duration, resolver *net.Resolver, logger *slog.Logger) (*Client, error) {
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+
+	dialer := &net.Dialer{Resolver: resolver}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = dialer.DialContext
+
 	host, port, err := net.SplitHostPort(propagationAddress)
 	if err != nil {
 		return nil, fmt.Errorf("invalid propagation address %q: %w", propagationAddress, err)
@@ -73,7 +83,12 @@ func New(baseURL *url.URL, propagationAddress string, labKey []byte, timeout tim
 		return nil, fmt.Errorf("invalid propagation address %q: host and port must not be empty", propagationAddress)
 	}
 
-	connection, err := grpc.NewClient(propagationAddress,
+	// The passthrough scheme keeps gRPC from resolving the host itself, so the
+	// dialer's resolver is the only one used.
+	connection, err := grpc.NewClient("passthrough:///"+propagationAddress,
+		grpc.WithContextDialer(func(ctx context.Context, address string) (net.Conn, error) {
+			return dialer.DialContext(ctx, "tcp", address)
+		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(maxMessageSize),
@@ -85,7 +100,7 @@ func New(baseURL *url.URL, propagationAddress string, labKey []byte, timeout tim
 
 	return &Client{
 		baseURL:     baseURL,
-		httpClient:  &http.Client{Timeout: timeout},
+		httpClient:  &http.Client{Timeout: timeout, Transport: transport},
 		labKey:      labKey,
 		logger:      logger,
 		connection:  connection,

@@ -8,11 +8,15 @@ import (
 
 	ruleErrors "dougdomingos.com/aegis/internal/common/errors"
 	"dougdomingos.com/aegis/internal/common/propagation"
+	"dougdomingos.com/aegis/internal/sentinel/filtering"
 	sentinelPropagation "dougdomingos.com/aegis/internal/sentinel/propagation"
 )
 
 // errSaveFailed aborts the persistence step of acceptance.
 var errSaveFailed = errors.New("disk full")
+
+// errFilterFailed aborts the enforcement step of acceptance.
+var errFilterFailed = errors.New("nft failed")
 
 func TestRunner_Apply_WithValidPackage_PersistsAndAcks(t *testing.T) {
 	ack, store := runApply(t, applyBaseline(), applyPackage(3))
@@ -229,6 +233,134 @@ func TestRunner_Apply_WithRevoke_PreservesSequenceAndClearsRules(t *testing.T) {
 	}
 }
 
+func TestRunner_Apply_WithValidPackage_AppliesFilteringBeforePersistAndAcks(t *testing.T) {
+	store := newRecordingStateStore()
+	store.setLoadState(applyBaseline())
+	filter := &fakeFilter{store: store}
+
+	harness := startApplyHarnessWithFilter(t, store, filter)
+	defer harness.stop(t)
+
+	harness.stream.push(applyPackage(3))
+	ack := waitForAck(t, harness.stream.acks, "acknowledgement")
+
+	if ack.Status != propagation.AckAcked {
+		t.Fatalf("ack = %+v, want ACKED", ack)
+	}
+	if len(filter.applied) != 1 {
+		t.Fatalf("Apply calls = %d, want 1", len(filter.applied))
+	}
+	if filter.savesAtApply[0] != 0 {
+		t.Errorf("Save calls before Apply = %d, want 0 (filtering must precede persistence)", filter.savesAtApply[0])
+	}
+	if store.saves() != 1 {
+		t.Errorf("Save calls = %d, want 1", store.saves())
+	}
+
+	snapshot := filter.applied[0]
+	if snapshot.PolicyType != propagation.PolicyTypeWhitelist || len(snapshot.Rules) != 2 {
+		t.Errorf("snapshot = %+v, want the whitelist package rules", snapshot)
+	}
+	if len(snapshot.OrchestratorIPs) != 1 || snapshot.OrchestratorIPs[0] != "10.0.0.5" {
+		t.Errorf("OrchestratorIPs = %v, want the runner essentials", snapshot.OrchestratorIPs)
+	}
+	if len(snapshot.UpstreamDNSIPs) != 1 || snapshot.UpstreamDNSIPs[0] != "10.0.0.6" {
+		t.Errorf("UpstreamDNSIPs = %v, want the runner essentials", snapshot.UpstreamDNSIPs)
+	}
+}
+
+func TestRunner_Apply_WithFilterApplyFailure_NacksAndKeepsPreviousState(t *testing.T) {
+	store := newRecordingStateStore()
+	store.setLoadState(applyBaseline())
+	filter := &fakeFilter{applyErr: errFilterFailed}
+
+	harness := startApplyHarnessWithFilter(t, store, filter)
+	defer harness.stop(t)
+
+	harness.stream.push(applyPackage(3))
+	first := waitForAck(t, harness.stream.acks, "the first acknowledgement")
+
+	if first.Status != propagation.AckNacked || first.Reason != "failed to apply filtering: nft failed" {
+		t.Fatalf("first ack = %+v, want NACKED with the filtering failure", first)
+	}
+	if store.saves() != 0 {
+		t.Errorf("Save calls = %d, want 0", store.saves())
+	}
+
+	filter.applyErr = nil
+	harness.stream.push(applyPackage(3))
+	second := waitForAck(t, harness.stream.acks, "the second acknowledgement")
+	if second.Status != propagation.AckAcked {
+		t.Errorf("second ack = %+v, want ACKED: the failed apply must keep the state at the baseline", second)
+	}
+}
+
+func TestRunner_Apply_WithNilFilter_NacksWithFilteringDisabled(t *testing.T) {
+	store := newRecordingStateStore()
+	store.setLoadState(applyBaseline())
+
+	harness := startApplyHarnessWithFilter(t, store, nil)
+	defer harness.stop(t)
+
+	harness.stream.push(applyPackage(3))
+	ack := waitForAck(t, harness.stream.acks, "acknowledgement")
+
+	if ack.Status != propagation.AckNacked || ack.Reason != "filtering disabled" {
+		t.Errorf("ack = %+v, want NACKED with reason %q", ack, "filtering disabled")
+	}
+	if store.saves() != 0 {
+		t.Errorf("Save calls = %d, want 0", store.saves())
+	}
+}
+
+func TestRunner_Apply_WithRevoke_ClearsFilteringAndAcks(t *testing.T) {
+	store := newRecordingStateStore()
+	store.setLoadState(applyBaseline())
+	filter := &fakeFilter{store: store}
+
+	harness := startApplyHarnessWithFilter(t, store, filter)
+	defer harness.stop(t)
+
+	harness.stream.push(applyRevoke(4))
+	ack := waitForAck(t, harness.stream.acks, "acknowledgement")
+
+	if ack.Status != propagation.AckAcked {
+		t.Fatalf("ack = %+v, want ACKED", ack)
+	}
+	if filter.clears != 1 || len(filter.applied) != 0 {
+		t.Errorf("Clear/Apply calls = %d/%d, want 1/0", filter.clears, len(filter.applied))
+	}
+	if store.saves() != 1 {
+		t.Errorf("Save calls = %d, want 1", store.saves())
+	}
+}
+
+func TestRunner_Apply_WithRevokeAndClearFailure_NacksAndKeepsPreviousState(t *testing.T) {
+	store := newRecordingStateStore()
+	store.setLoadState(applyBaseline())
+	filter := &fakeFilter{clearErr: errFilterFailed}
+
+	harness := startApplyHarnessWithFilter(t, store, filter)
+	defer harness.stop(t)
+
+	harness.stream.push(applyRevoke(4))
+	first := waitForAck(t, harness.stream.acks, "the first acknowledgement")
+
+	if first.Status != propagation.AckNacked || first.Reason != "failed to apply filtering: nft failed" {
+		t.Fatalf("first ack = %+v, want NACKED with the filtering failure", first)
+	}
+	if store.saves() != 0 {
+		t.Errorf("Save calls = %d, want 0", store.saves())
+	}
+
+	filter.clearErr = nil
+	harness.stream.push(applyRevoke(4))
+	second := waitForAck(t, harness.stream.acks, "the second acknowledgement")
+	if second.Status != propagation.AckAcked {
+		t.Errorf("second ack = %+v, want ACKED: the failed clear must keep the state at the baseline", second)
+	}
+}
+
 // ============================================================================
 // Fixtures and helpers
 // ============================================================================
@@ -307,13 +439,21 @@ type applyHarness struct {
 func startApplyHarness(t *testing.T, store *recordingStateStore) *applyHarness {
 	t.Helper()
 
+	return startApplyHarnessWithFilter(t, store, &fakeFilter{})
+}
+
+// startApplyHarnessWithFilter launches a runner enforcing through the provided
+// filter; a nil filter disables filtering.
+func startApplyHarnessWithFilter(t *testing.T, store *recordingStateStore, filter filtering.Filter) *applyHarness {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	stream := newFakeStream()
 	connector := newFakeConnector()
 	connector.enqueueStream(stream)
 
-	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), discardLogger())
+	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), filter, applyEssentials(), discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()
@@ -333,4 +473,59 @@ func (harness *applyHarness) stop(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run() did not return after cancellation")
 	}
+}
+
+// applyEssentials are the essential addresses the runner under test carries.
+func applyEssentials() sentinelPropagation.Essentials {
+	return sentinelPropagation.Essentials{
+		OrchestratorIPs: []string{"10.0.0.5"},
+		UpstreamDNSIPs:  []string{"10.0.0.6"},
+	}
+}
+
+// applyRevoke builds a revoke for machine 7 at the given sequence.
+func applyRevoke(sequence int64) *propagation.Message {
+	return &propagation.Message{
+		Epoch:     "epoch-a",
+		Sequence:  sequence,
+		MachineID: 7,
+		Kind:      propagation.KindRevoke,
+	}
+}
+
+// fakeFilter records filtering calls and fails on demand. When store is set,
+// it records how many saves had happened at each Apply. It is only touched
+// from the runner goroutine while a test waits on acknowledgements.
+type fakeFilter struct {
+	store        *recordingStateStore
+	applyErr     error
+	clearErr     error
+	applied      []filtering.PolicySnapshot
+	savesAtApply []int
+	clears       int
+}
+
+// Apply records the snapshot and returns the scripted error.
+func (fake *fakeFilter) Apply(snapshot filtering.PolicySnapshot) error {
+	if fake.applyErr != nil {
+		return fake.applyErr
+	}
+
+	fake.applied = append(fake.applied, snapshot)
+	if fake.store != nil {
+		fake.savesAtApply = append(fake.savesAtApply, fake.store.saves())
+	}
+
+	return nil
+}
+
+// Clear records the call and returns the scripted error.
+func (fake *fakeFilter) Clear() error {
+	if fake.clearErr != nil {
+		return fake.clearErr
+	}
+
+	fake.clears++
+
+	return nil
 }

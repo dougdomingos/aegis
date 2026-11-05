@@ -32,7 +32,7 @@ func TestRunner_Run_WithPackageMessage_AppliesAndAcks(t *testing.T) {
 	connector := newFakeConnector()
 	connector.enqueueStream(stream)
 
-	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), discardLogger())
+	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	session := runnerSession()
 	done := make(chan error, 1)
@@ -68,7 +68,7 @@ func TestRunner_Run_WhenStreamFails_Reconnects(t *testing.T) {
 	connector.enqueueStream(broken)
 	connector.enqueueStream(recovered)
 
-	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), discardLogger())
+	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()
@@ -100,7 +100,7 @@ func TestRunner_Run_WhenUnauthenticated_RenewsSessionAndRetries(t *testing.T) {
 
 	renewer := newFakeRenewer(renewed)
 
-	runner := sentinelPropagation.New(store, connector, renewer, discardLogger())
+	runner := sentinelPropagation.New(store, connector, renewer, &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()
@@ -136,7 +136,7 @@ func TestRunner_Run_WhenRenewedTokenStillRejected_BacksOffInsteadOfSpinning(t *t
 		MAC:         "aa:bb:cc:dd:ee:ff",
 	})
 
-	runner := sentinelPropagation.New(store, connector, renewer, discardLogger())
+	runner := sentinelPropagation.New(store, connector, renewer, &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()
@@ -171,7 +171,7 @@ func TestRunner_Run_WhenContextCancelled_ReturnsNil(t *testing.T) {
 	connector := newFakeConnector()
 	connector.enqueueStream(stream)
 
-	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), discardLogger())
+	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()
@@ -204,7 +204,7 @@ func TestRunner_Run_WhenStateFileCorrupt_StartsFromZeroState(t *testing.T) {
 	connector := newFakeConnector()
 	connector.enqueueStream(stream)
 
-	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), discardLogger())
+	runner := sentinelPropagation.New(store, connector, newFakeRenewer(nil), &fakeFilter{}, sentinelPropagation.Essentials{}, discardLogger())
 
 	done := make(chan error, 1)
 	go func() { done <- runner.Run(ctx, runnerSession()) }()

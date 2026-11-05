@@ -64,3 +64,18 @@ Propagation is controlled by two optional fields:
   server. Defaults to the `orchestrator_url` host with port `9090`.
 - `rules_state_path`: the file where the Sentinel durably stores the last
   applied rules, written atomically. Defaults to `/var/lib/aegis/rules.json`.
+
+Local filtering is controlled by four more optional fields:
+
+- `filtering_enabled`: the string `"true"` or `"false"`. Defaults to `"true"`.
+  When `"false"`, the Sentinel rejects every propagated policy because it cannot
+  enforce it.
+- `dns_listen_address`: the `host:port` the embedded DNS server binds to.
+  Defaults to `127.0.0.1:53`.
+- `dns_upstream_servers`: IP addresses of the upstream DNS servers the embedded
+  server forwards allowed queries to. Required on the spec's image, because
+  `resolv.conf` points at the Sentinel itself, so no system resolver can be
+  used as the default. The first entry is also used to resolve the Orchestrator
+  before the embedded server is serving.
+- `nft_binary_path`: the `nft` executable used to apply the rulesets. Defaults
+  to `nft`, resolved from `PATH`.

@@ -9,6 +9,7 @@ import (
 
 	"dougdomingos.com/aegis/internal/common/propagation"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
+	"dougdomingos.com/aegis/internal/sentinel/filtering"
 	"dougdomingos.com/aegis/internal/sentinel/identity"
 	"dougdomingos.com/aegis/internal/sentinel/logging"
 	"google.golang.org/grpc/codes"
@@ -41,25 +42,39 @@ type SessionRenewer interface {
 	Authenticate(ctx context.Context, id identity.Identity) (*daemon.Session, error)
 }
 
+// Essentials are the addresses a WHITELIST policy must always accept. They are
+// resolved by the caller, never by the Runner.
+type Essentials struct {
+	// OrchestratorIPs are the Orchestrator addresses.
+	OrchestratorIPs []string
+
+	// UpstreamDNSIPs are the upstream resolver addresses.
+	UpstreamDNSIPs []string
+}
+
 // Runner keeps one long-lived propagation stream alive: it applies and
 // acknowledges received messages, reconnects with exponential backoff after
 // failures, and renews the session when the Orchestrator reports it as
 // unauthenticated. It never returns a non-nil error, so a propagation failure
 // can never kill the daemon.
 type Runner struct {
-	store     StateStore
-	connector Connector
-	renewer   SessionRenewer
-	logger    *slog.Logger
+	store      StateStore
+	connector  Connector
+	renewer    SessionRenewer
+	filter     filtering.Filter
+	essentials Essentials
+	logger     *slog.Logger
 }
 
-// New builds a propagation Runner. A nil logger discards every record.
-func New(store StateStore, connector Connector, renewer SessionRenewer, logger *slog.Logger) *Runner {
+// New builds a propagation Runner. A nil logger discards every record. A nil
+// filter means filtering is disabled: every message is rejected, since it
+// cannot be enforced.
+func New(store StateStore, connector Connector, renewer SessionRenewer, filter filtering.Filter, essentials Essentials, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 
-	return &Runner{store: store, connector: connector, renewer: renewer, logger: logger}
+	return &Runner{store: store, connector: connector, renewer: renewer, filter: filter, essentials: essentials, logger: logger}
 }
 
 // Run consumes the propagation stream until the context is cancelled,

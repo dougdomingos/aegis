@@ -1,11 +1,13 @@
 package propagation
 
 import (
+	"fmt"
 	"strings"
 
 	"dougdomingos.com/aegis/internal/common/propagation"
 	"dougdomingos.com/aegis/internal/common/rules"
 	"dougdomingos.com/aegis/internal/sentinel/daemon"
+	"dougdomingos.com/aegis/internal/sentinel/filtering"
 )
 
 // apply validates one received message against the session and the stored
@@ -100,9 +102,35 @@ func (runner *Runner) apply(session *daemon.Session, state State, message *propa
 		return nack("unknown message kind")
 	}
 
+	if runner.filter == nil {
+		return nack("filtering disabled")
+	}
+
+	var filterErr error
+	if message.Kind == propagation.KindRevoke {
+		filterErr = runner.filter.Clear()
+	} else {
+		filterErr = runner.filter.Apply(runner.snapshotFor(next))
+	}
+
+	if filterErr != nil {
+		return nack(fmt.Sprintf("failed to apply filtering: %v", filterErr))
+	}
+
 	if err := runner.store.Save(next); err != nil {
 		return nack("failed to persist state")
 	}
 
 	return next, propagation.Ack{Sequence: message.Sequence, Status: propagation.AckAcked}
+}
+
+// snapshotFor builds the filtering snapshot of a state, adding the runner's
+// essential addresses.
+func (runner *Runner) snapshotFor(state State) filtering.PolicySnapshot {
+	return filtering.PolicySnapshot{
+		PolicyType:      state.PolicyType,
+		Rules:           state.Rules,
+		OrchestratorIPs: runner.essentials.OrchestratorIPs,
+		UpstreamDNSIPs:  runner.essentials.UpstreamDNSIPs,
+	}
 }

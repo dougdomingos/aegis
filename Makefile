@@ -15,6 +15,10 @@ TEST_PACKAGES = ./internal/orchestrator/store \
 	./internal/sentinel/heartbeat \
 	./internal/sentinel/identity \
 	./internal/sentinel/client \
+	./internal/sentinel/filtering \
+	./internal/sentinel/hostresolve \
+	./internal/sentinel/filtering/nftables \
+	./internal/sentinel/filtering/dnsserver \
 	./internal/orchestrator/infra/migrations \
 	./internal/orchestrator/infra/query \
 	./internal/orchestrator/api/handler \

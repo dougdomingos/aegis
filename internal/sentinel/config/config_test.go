@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,32 @@ const validLabKey = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789A
 
 // labKeyFile is the contents of a valid lab key file.
 const labKeyFile = validLabKey + "\n"
+
+// resolvConfFixture is the contents of the resolv.conf fixture that replaces the
+// host file for the whole test run, keeping default upstream resolution hermetic.
+const resolvConfFixture = "# fixture\nnameserver 10.0.0.1\nnameserver 10.0.0.2\n"
+
+// TestMain points the default resolv.conf path at a fixture for the whole run so
+// tests never depend on the host's DNS configuration.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "config-test")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create resolv.conf fixture directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	path := filepath.Join(dir, "resolv.conf")
+	if err := os.WriteFile(path, []byte(resolvConfFixture), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write resolv.conf fixture: %v\n", err)
+		os.RemoveAll(dir)
+		os.Exit(1)
+	}
+
+	config.ResolvConfPath = path
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func TestConfig_Load_WithValidFile_ReturnsParsedConfig(t *testing.T) {
 	keyPath := writeTempFile(t, labKeyFile)
@@ -345,6 +372,194 @@ func TestConfig_Load_HeartbeatInterval_InvalidValues_ReturnError(t *testing.T) {
 	}
 }
 
+func TestConfig_Load_WithFilteringDefaults_AppliesDefaults(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if !cfg.FilteringEnabled {
+		t.Errorf("cfg.FilteringEnabled = false, want true")
+	}
+
+	if cfg.DNSListenAddress != "127.0.0.1:53" {
+		t.Errorf("cfg.DNSListenAddress = %q, want %q", cfg.DNSListenAddress, "127.0.0.1:53")
+	}
+
+	expectedUpstreams := []string{"10.0.0.1", "10.0.0.2"}
+	if fmt.Sprint(cfg.DNSUpstreamServers) != fmt.Sprint(expectedUpstreams) {
+		t.Errorf("cfg.DNSUpstreamServers = %v, want %v", cfg.DNSUpstreamServers, expectedUpstreams)
+	}
+
+	if cfg.NftBinaryPath != "nft" {
+		t.Errorf("cfg.NftBinaryPath = %q, want %q", cfg.NftBinaryPath, "nft")
+	}
+}
+
+func TestConfig_Load_WithFilteringOverrides_AppliesProvidedValues(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{
+		"orchestrator_url": "http://10.0.0.5:8080",
+		"lab_key_path": "` + keyPath + `",
+		"filtering_enabled": "false",
+		"dns_listen_address": "10.0.0.5:5353",
+		"dns_upstream_servers": ["1.1.1.1", "8.8.8.8"],
+		"nft_binary_path": "/usr/sbin/nft"
+	}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.FilteringEnabled {
+		t.Errorf("cfg.FilteringEnabled = true, want false")
+	}
+
+	if cfg.DNSListenAddress != "10.0.0.5:5353" {
+		t.Errorf("cfg.DNSListenAddress = %q, want %q", cfg.DNSListenAddress, "10.0.0.5:5353")
+	}
+
+	expectedUpstreams := []string{"1.1.1.1", "8.8.8.8"}
+	if fmt.Sprint(cfg.DNSUpstreamServers) != fmt.Sprint(expectedUpstreams) {
+		t.Errorf("cfg.DNSUpstreamServers = %v, want %v", cfg.DNSUpstreamServers, expectedUpstreams)
+	}
+
+	if cfg.NftBinaryPath != "/usr/sbin/nft" {
+		t.Errorf("cfg.NftBinaryPath = %q, want %q", cfg.NftBinaryPath, "/usr/sbin/nft")
+	}
+}
+
+func TestConfig_Load_WithInvalidDNSListenAddress_ReturnsError(t *testing.T) {
+	cases := map[string]struct {
+		address string
+	}{
+		"no port":  {address: "127.0.0.1"},
+		"bad port": {address: "127.0.0.1:abc"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			keyPath := writeTempFile(t, labKeyFile)
+			document := `{
+				"orchestrator_url": "http://10.0.0.5:8080",
+				"lab_key_path": "` + keyPath + `",
+				"dns_listen_address": "` + tc.address + `",
+				"dns_upstream_servers": ["1.1.1.1"]
+			}`
+
+			if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+				t.Errorf("config.Load() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestConfig_Load_WithInvalidDNSUpstream_ReturnsError(t *testing.T) {
+	cases := map[string]struct {
+		upstream string
+	}{
+		"hostname":  {upstream: "dns.example.com"},
+		"host:port": {upstream: "1.1.1.1:53"},
+		"empty":     {upstream: ""},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			keyPath := writeTempFile(t, labKeyFile)
+			document := `{
+				"orchestrator_url": "http://10.0.0.5:8080",
+				"lab_key_path": "` + keyPath + `",
+				"dns_listen_address": "127.0.0.1:53",
+				"dns_upstream_servers": ["` + tc.upstream + `"]
+			}`
+
+			if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+				t.Errorf("config.Load() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestConfig_Load_WithLoopbackOnlyResolvConf_ReturnsError(t *testing.T) {
+	useResolvConfPath(t, writeTempFile(t, "nameserver 127.0.0.53\nnameserver ::1\n"))
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+		t.Errorf("config.Load() error = nil, want error")
+	}
+}
+
+func TestConfig_Load_WithMixedResolvConf_KeepsOnlyNonLoopbackNameservers(t *testing.T) {
+	useResolvConfPath(t, writeTempFile(t, "nameserver 127.0.0.53\nnameserver 192.168.1.1\nnameserver ::1\n"))
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	expectedUpstreams := []string{"192.168.1.1"}
+	if fmt.Sprint(cfg.DNSUpstreamServers) != fmt.Sprint(expectedUpstreams) {
+		t.Errorf("cfg.DNSUpstreamServers = %v, want %v", cfg.DNSUpstreamServers, expectedUpstreams)
+	}
+}
+
+func TestConfig_Load_WithMissingResolvConf_ReturnsError(t *testing.T) {
+	useResolvConfPath(t, filepath.Join(t.TempDir(), "missing.conf"))
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+		t.Errorf("config.Load() error = nil, want error")
+	}
+}
+
+func TestConfig_Load_WithResolvConfWithoutNameservers_ReturnsError(t *testing.T) {
+	useResolvConfPath(t, writeTempFile(t, "# no servers\nsearch example.com\n"))
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `"}`
+
+	if _, err := config.Load(writeTempConfig(t, document)); err == nil {
+		t.Errorf("config.Load() error = nil, want error")
+	}
+}
+
+func TestConfig_Load_WithFilteringDisabledAndMissingResolvConf_SkipsResolvConf(t *testing.T) {
+	useResolvConfPath(t, filepath.Join(t.TempDir(), "missing.conf"))
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `", "filtering_enabled": "false"}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	if cfg.DNSUpstreamServers != nil {
+		t.Errorf("cfg.DNSUpstreamServers = %v, want nil", cfg.DNSUpstreamServers)
+	}
+}
+
+func TestConfig_Load_WithExplicitLoopbackUpstream_KeepsValue(t *testing.T) {
+	keyPath := writeTempFile(t, labKeyFile)
+	document := `{"orchestrator_url": "http://10.0.0.5:8080", "lab_key_path": "` + keyPath + `", "dns_upstream_servers": ["127.0.0.1"]}`
+
+	cfg, err := config.Load(writeTempConfig(t, document))
+	if err != nil {
+		t.Fatalf("config.Load() error = %v, want nil", err)
+	}
+
+	expectedUpstreams := []string{"127.0.0.1"}
+	if fmt.Sprint(cfg.DNSUpstreamServers) != fmt.Sprint(expectedUpstreams) {
+		t.Errorf("cfg.DNSUpstreamServers = %v, want %v", cfg.DNSUpstreamServers, expectedUpstreams)
+	}
+}
+
 // decodeHex decodes the provided hexadecimal string, failing the test on a
 // malformed value.
 func decodeHex(t *testing.T, value string) []byte {
@@ -382,4 +597,15 @@ func writeTempConfig(t *testing.T, document string) string {
 	}
 
 	return path
+}
+
+// useResolvConfPath points config.ResolvConfPath at the provided path and
+// restores the previous path when the test ends.
+func useResolvConfPath(t *testing.T, path string) {
+	t.Helper()
+
+	previous := config.ResolvConfPath
+	t.Cleanup(func() { config.ResolvConfPath = previous })
+
+	config.ResolvConfPath = path
 }

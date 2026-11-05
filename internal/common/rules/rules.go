@@ -52,7 +52,9 @@ func Validate(rule Rule) error {
 
 	case "IP":
 		if net.ParseIP(rule.Value) == nil {
-			return errors.ErrMalformedRuleValue
+			if _, _, err := net.ParseCIDR(rule.Value); err != nil {
+				return errors.ErrMalformedRuleValue
+			}
 		}
 
 		if rule.Port != nil && (*rule.Port < 0 || *rule.Port > 65535) {
