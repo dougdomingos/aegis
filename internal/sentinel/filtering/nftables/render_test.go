@@ -141,7 +141,7 @@ func TestRenderRuleset_WithIPRuleFields_RendersProtocolAndPort(t *testing.T) {
 				{Type: "IP", Value: "10.0.0.6", Protocol: ptr("TCP"), Port: ptr(22)},
 			},
 			wantContains: []string{"ip daddr 10.0.0.6", "tcp dport 22"},
-			wantOmits:    []string{"10.0.0.5", "icmp"},
+			wantOmits:    []string{"10.0.0.5", "meta l4proto icmp", "icmp type"},
 		},
 		"unknown protocol without port is skipped": {
 			rules:     []propagation.Rule{{Type: "IP", Value: "10.0.0.3", Protocol: ptr("HTTP")}},
@@ -204,6 +204,7 @@ func TestRenderRuleset_WithWhitelistSnapshot_RendersResolvedSetAndEssentials(t *
 				"ip daddr @aegis_resolved accept",
 				"ct state established,related accept",
 				`oifname "lo" accept`,
+				"icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit } accept",
 				"ip daddr 192.168.10.1 accept",
 				"ip daddr 192.168.10.2 accept",
 				"ip daddr 192.168.10.53 udp dport 53 accept",

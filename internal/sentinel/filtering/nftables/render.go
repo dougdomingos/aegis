@@ -98,6 +98,10 @@ func renderWhitelist(ruleset *strings.Builder, snapshot filtering.PolicySnapshot
 	// which are new connections the policy would otherwise drop.
 	fmt.Fprintln(ruleset, "\t\toifname \"lo\" accept")
 
+	// IPv6 neighbor discovery resolves the link-layer addresses of every
+	// destination, so dropping it would break all IPv6 connectivity.
+	fmt.Fprintln(ruleset, "\t\ticmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit } accept")
+
 	for _, rule := range snapshot.Rules {
 		writeRuleStatements(ruleset, rule, "accept")
 	}
