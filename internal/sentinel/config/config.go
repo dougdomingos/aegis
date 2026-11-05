@@ -427,7 +427,7 @@ func parseDNSUpstreamServers(raw []string, filteringEnabled bool) ([]string, err
 		}
 
 		if len(servers) == 0 {
-			return nil, fmt.Errorf("dns_upstream_servers is required: no nameserver entries found in %s", ResolvConfPath)
+			return nil, fmt.Errorf("dns_upstream_servers is required: no non-loopback nameserver entries found in %s", ResolvConfPath)
 		}
 
 		return servers, nil
@@ -448,7 +448,8 @@ func parseDNSUpstreamServers(raw []string, filteringEnabled bool) ([]string, err
 
 // readResolvNameservers returns the IP addresses listed in the nameserver
 // entries of the resolver configuration file at the provided path, skipping
-// entries that are not valid IP addresses.
+// entries that are not valid IP addresses and loopback addresses, which would
+// make the embedded resolver forward queries to itself.
 func readResolvNameservers(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -462,9 +463,12 @@ func readResolvNameservers(path string) ([]string, error) {
 			continue
 		}
 
-		if net.ParseIP(fields[1]) != nil {
-			servers = append(servers, fields[1])
+		ip := net.ParseIP(fields[1])
+		if ip == nil || ip.IsLoopback() {
+			continue
 		}
+
+		servers = append(servers, fields[1])
 	}
 
 	return servers, nil
