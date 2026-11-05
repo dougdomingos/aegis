@@ -56,9 +56,17 @@ Acceptance criteria (from the issue):
 | Sentinel behavior on heartbeat failure | **Never fatal at runtime** | A transient Orchestrator outage must not kill the daemon (already deployed on lab machines); the machine simply goes stale and recovery happens on the next tick. |
 | Token expiry handling | **Transparent re-authentication inside the ticking loop** | The lab key stays loaded for exactly this; a machine whose token expires without re-auth would otherwise flip to `DISCONNECTED` every 24 hours. |
 | Heartbeat interval | Config field `heartbeat_interval`, default **30s** | Each machine's interval may vary; nothing in the Orchestrator needs to know it. |
+
 | Orchestrator staleness grace | Fixed **90s** (3× the default interval) | Single misframe default beats a config knob nobody asked for; a machine is `CONNECTED` for exactly one grace window after its last heartbeat (or successful authentication). |
 | Session-token primitives | **Move signing/verification into `internal/auth`** | Today the token format (`base64(payload).base64(hmac)`) lives only in `internal/service`. Verifying it must not duplicate that knowledge; `auth` is the shared home for both tiers' authentication primitives. |
 | Session delivery to tasks | **Pass the authenticated `Session` into each task** | Tasks are constructed before `daemon.Run` authenticates, so a task cannot receive the token at construction time; handing the session in at task start is the smallest contract change. |
+
+> **Note (US09, 2026-11-04):** The rule-propagation channel is now an
+> authenticated gRPC stream dialed by the Sentinel to the Orchestrator
+> ([US09 design](./2026-11-03-us09-rule-propagation-design.md)). This supersedes
+> the earlier "push-over-HTTPS with the Sentinel serving the inbound endpoint"
+> parenthetical in the Transport rationale; the heartbeat decision itself is
+> unchanged.
 
 ## 4. Session Token Primitives (`internal/auth/session.go`)
 
