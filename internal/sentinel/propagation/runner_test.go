@@ -175,6 +175,48 @@ func TestRunner_Run_WhenStateFileCorrupt_StartsFromZeroState(t *testing.T) {
 	waitForCondition(t, func() bool { return store.saves() == 1 })
 }
 
+func TestRunner_Run_WhenRenewedTokenStillRejected_BacksOffInsteadOfSpinning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := newRecordingStateStore()
+	connector := newFakeConnector()
+	connector.alwaysErr = status.Error(codes.Unauthenticated, "invalid session token")
+
+	renewer := newFakeRenewer(&daemon.Session{
+		Token:       "renewed-token",
+		MachineID:   7,
+		MachineName: "lcc1-001",
+		IP:          "10.0.1.11",
+		MAC:         "aa:bb:cc:dd:ee:ff",
+	})
+
+	runner := sentinelPropagation.New(store, connector, renewer, discardLogger())
+
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx, runnerSession()) }()
+
+	// The first cycle fails, renews, and must sleep the initial backoff
+	// before retrying the rejected token: a tight loop would renew
+	// hundreds of times within this window.
+	time.Sleep(300 * time.Millisecond)
+
+	if calls := renewer.calls(); calls > 2 {
+		t.Errorf("renewal calls = %d, want at most 2 within the initial 1s backoff", calls)
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Run() = %v, want nil after cancellation", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+}
+
 // ============================================================================
 // Fixtures
 // ============================================================================
@@ -332,10 +374,11 @@ type connectAttempt struct {
 // fakeConnector is a sentinelPropagation.Connector double serving queued
 // outcomes and recording the token of every attempt.
 type fakeConnector struct {
-	mu       sync.Mutex
-	attempts []connectAttempt
-	seen     int
-	tokens   []string
+	mu        sync.Mutex
+	attempts  []connectAttempt
+	seen      int
+	tokens    []string
+	alwaysErr error
 }
 
 func newFakeConnector() *fakeConnector {
@@ -362,6 +405,10 @@ func (fake *fakeConnector) ConnectPropagation(ctx context.Context, token string)
 	defer fake.mu.Unlock()
 
 	fake.tokens = append(fake.tokens, token)
+
+	if fake.alwaysErr != nil {
+		return nil, fake.alwaysErr
+	}
 
 	if fake.seen >= len(fake.attempts) {
 		return nil, errors.New("no further streams queued for the propagation fake")

@@ -86,17 +86,22 @@ func (runner *Runner) Run(ctx context.Context, session *daemon.Session) error {
 		if err != nil {
 			if status.Code(err) == codes.Unauthenticated {
 				renewed, renewErr := runner.renewer.Authenticate(ctx, identity.Identity{IP: current.IP, MAC: current.MAC})
-				if renewErr == nil && renewed != nil {
+				switch {
+				case renewErr != nil:
+					runner.logger.Warn("propagation session renewal failed", "error", renewErr)
+				case renewed == nil:
+					runner.logger.Warn("propagation session renewal returned no session")
+				default:
 					current = *renewed
 					runner.logger.Info("propagation session renewed", "fingerprint", logging.Fingerprint(current.Token))
-					continue
 				}
-
-				runner.logger.Warn("propagation session renewal failed", "error", renewErr)
 			} else {
 				runner.logger.Warn("propagation stream failed", "error", err)
 			}
 
+			// Every failed attempt backs off — including a successful
+			// renewal whose fresh token the Orchestrator still rejects,
+			// which must not spin the loop.
 			if !sleepWithContext(ctx, backoff) {
 				return nil
 			}
