@@ -4,8 +4,8 @@ set -euo pipefail
 
 export LIBVIRT_DEFAULT_URI=qemu:///system
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VM_DIR="$ROOT_DIR/vm"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+VM_DIR="$ROOT_DIR/e2e/vm"
 TEMPLATES="$VM_DIR/templates"
 STATE_DIR="$VM_DIR/.state"
 SSH_KEY="$STATE_DIR/id_ed25519"
@@ -13,7 +13,9 @@ SSH_KEY="$STATE_DIR/id_ed25519"
 POOL=aegis-vm
 POOL_DIR=/var/lib/libvirt/images/aegis-vm
 NETWORK=aegis-net
-BASE_VOL=aegis-base.qcow2
+# The base volume name embeds a hash of base.yaml, so changing the packages
+# rebuilds the image instead of reusing a stale one.
+BASE_VOL="aegis-base-$(sha256sum "$TEMPLATES/cloud-init/base.yaml" | cut -c1-8).qcow2"
 WORK_VOL=aegis-base-building.qcow2
 BUILDER=aegis-builder
 IMAGE_URL=https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img

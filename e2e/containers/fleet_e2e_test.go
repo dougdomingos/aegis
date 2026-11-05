@@ -1,10 +1,10 @@
 //go:build e2e
 
-// Package e2e runs end-to-end tests against the real Aegis binaries. The suite
+// Package containers runs end-to-end tests against the real Aegis binaries. The suite
 // builds one image containing both executables, boots the Orchestrator and a
 // fleet of Sentinels on a fixed-subnet Docker network, and asserts on the
 // machine registry, the container exit codes and the emitted log records.
-package e2e
+package containers
 
 import (
 	"context"

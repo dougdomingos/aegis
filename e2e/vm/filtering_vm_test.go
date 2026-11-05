@@ -22,49 +22,54 @@ const (
 // allTargets lists every target that must be reachable with no policy.
 var allTargets = []string{"http://allowed.test", "http://blocked.test", "http://" + allowedIP, "http://" + blockedIP}
 
-func TestFiltering_Policy_WithEachTypeAndRule_EnforcesTraffic(t *testing.T) {
-	scenarios := map[string]struct {
-		policyType string
-		ruleType   string
-		value      string
-		reachable  []string
-		blocked    map[string]int
-	}{
-		"whitelist domain": {
-			policyType: "WHITELIST", ruleType: "DOMAIN", value: "allowed.test",
-			reachable: []string{"http://allowed.test"},
-			blocked:   map[string]int{"http://blocked.test": curlDNSRefused, "http://" + blockedIP: curlTimedOut},
-		},
-		"whitelist ip": {
-			policyType: "WHITELIST", ruleType: "IP", value: allowedIP,
-			reachable: []string{"http://" + allowedIP},
-			blocked:   map[string]int{"http://" + blockedIP: curlTimedOut},
-		},
-		"blacklist domain": {
-			policyType: "BLACKLIST", ruleType: "DOMAIN", value: "blocked.test",
-			reachable: []string{"http://allowed.test"},
-			blocked:   map[string]int{"http://blocked.test": curlDNSRefused},
-		},
-		"blacklist ip": {
-			policyType: "BLACKLIST", ruleType: "IP", value: blockedIP,
-			reachable: []string{"http://" + allowedIP},
-			blocked:   map[string]int{"http://" + blockedIP: curlTimedOut},
-		},
-	}
+// scenario is one policy and the traffic it must allow and block. Blocked
+// targets map to the curl exit code expected when fetching them.
+type scenario struct {
+	policyType string
+	ruleType   string
+	value      string
+	reachable  []string
+	blocked    map[string]int
+}
 
-	for name, scenario := range scenarios {
+// scenarios covers every policy type with every rule type.
+var scenarios = map[string]scenario{
+	"whitelist domain": {
+		policyType: "WHITELIST", ruleType: "DOMAIN", value: "allowed.test",
+		reachable: []string{"http://allowed.test"},
+		blocked:   map[string]int{"http://blocked.test": curlDNSRefused, "http://" + blockedIP: curlTimedOut},
+	},
+	"whitelist ip": {
+		policyType: "WHITELIST", ruleType: "IP", value: allowedIP,
+		reachable: []string{"http://" + allowedIP},
+		blocked:   map[string]int{"http://" + blockedIP: curlTimedOut},
+	},
+	"blacklist domain": {
+		policyType: "BLACKLIST", ruleType: "DOMAIN", value: "blocked.test",
+		reachable: []string{"http://allowed.test"},
+		blocked:   map[string]int{"http://blocked.test": curlDNSRefused},
+	},
+	"blacklist ip": {
+		policyType: "BLACKLIST", ruleType: "IP", value: blockedIP,
+		reachable: []string{"http://" + allowedIP},
+		blocked:   map[string]int{"http://" + blockedIP: curlTimedOut},
+	},
+}
+
+func TestFiltering_Policy_WithEachTypeAndRule_EnforcesTraffic(t *testing.T) {
+	for name, sc := range scenarios {
 		t.Run(name, func(t *testing.T) {
 			// Arrange
 			l := newLab(t)
 			requireReachable(t, l, allTargets)
 
 			// Act and assert: enforcement
-			sequence := l.applyPolicy(t, scenario.policyType, scenario.ruleType, scenario.value)
-			assertTraffic(t, l, scenario.reachable, scenario.blocked)
+			sequence := l.applyPolicy(t, sc.policyType, sc.ruleType, sc.value)
+			assertTraffic(t, l, sc.reachable, sc.blocked)
 
 			// Act and assert: recovery after a reboot
 			sequence = l.reboot(t, sequence)
-			assertTraffic(t, l, scenario.reachable, scenario.blocked)
+			assertTraffic(t, l, sc.reachable, sc.blocked)
 
 			// Act and assert: revoke
 			l.revoke(t, sequence)

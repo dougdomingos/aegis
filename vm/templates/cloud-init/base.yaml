@@ -1,8 +1,0 @@
-#cloud-config
-package_update: true
-packages: [nftables, curl, dnsmasq, python3, dnsutils]
-runcmd:
-  - systemctl disable --now dnsmasq
-power_state:
-  mode: poweroff
-  condition: dpkg -s nftables curl dnsmasq python3 dnsutils

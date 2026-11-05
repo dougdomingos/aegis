@@ -6,4 +6,5 @@ bin
 collections
 coverage.out
 examples/sentinel.config.json
-e2e/*_test.go
+e2e/containers/*_test.go
+e2e/vm
