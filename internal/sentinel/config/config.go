@@ -46,7 +46,24 @@ const (
 	// (90s): an interval equal to or longer than it would leave a machine
 	// displayed as DISCONNECTED between heartbeats that always succeed.
 	maxHeartbeatInterval = 90 * time.Second
+
+	// defaultFilteringEnabled is whether local DNS filtering is enabled when the
+	// configuration does not override it.
+	defaultFilteringEnabled = true
+
+	// defaultDNSListenAddress is the host:port the embedded DNS server binds to
+	// when the configuration does not override it.
+	defaultDNSListenAddress = "127.0.0.1:53"
+
+	// defaultNftBinaryPath is the nft executable resolved from PATH when the
+	// configuration does not override it.
+	defaultNftBinaryPath = "nft"
 )
+
+// ResolvConfPath is the resolver configuration file whose nameserver entries
+// become the default DNS upstream servers. It is a variable so tests can point
+// it at a fixture.
+var ResolvConfPath = "/etc/resolv.conf"
 
 // Config holds the Sentinel daemon configuration.
 type Config struct {
@@ -77,18 +94,35 @@ type Config struct {
 	// RulesStatePath is the durable state file where the Sentinel stores the
 	// last applied propagation.
 	RulesStatePath string
+
+	// FilteringEnabled reports whether local DNS filtering is enabled.
+	FilteringEnabled bool
+
+	// DNSListenAddress is the host:port the embedded DNS server binds to.
+	DNSListenAddress string
+
+	// DNSUpstreamServers are the IP addresses the embedded DNS server forwards
+	// unfiltered queries to.
+	DNSUpstreamServers []string
+
+	// NftBinaryPath is the nft executable used to apply the filtering rulesets.
+	NftBinaryPath string
 }
 
 // document mirrors the JSON configuration file schema.
 type document struct {
-	OrchestratorURL    string `json:"orchestrator_url"`
-	LabKeyPath         string `json:"lab_key_path"`
-	RequestTimeout     string `json:"request_timeout"`
-	HeartbeatInterval  string `json:"heartbeat_interval"`
-	LogLevel           string `json:"log_level"`
-	LogFormat          string `json:"log_format"`
-	PropagationAddress string `json:"propagation_address"`
-	RulesStatePath     string `json:"rules_state_path"`
+	OrchestratorURL    string   `json:"orchestrator_url"`
+	LabKeyPath         string   `json:"lab_key_path"`
+	RequestTimeout     string   `json:"request_timeout"`
+	HeartbeatInterval  string   `json:"heartbeat_interval"`
+	LogLevel           string   `json:"log_level"`
+	LogFormat          string   `json:"log_format"`
+	PropagationAddress string   `json:"propagation_address"`
+	RulesStatePath     string   `json:"rules_state_path"`
+	FilteringEnabled   string   `json:"filtering_enabled"`
+	DNSListenAddress   string   `json:"dns_listen_address"`
+	DNSUpstreamServers []string `json:"dns_upstream_servers"`
+	NftBinaryPath      string   `json:"nft_binary_path"`
 }
 
 // Load reads and validates the Sentinel daemon configuration from the file
@@ -147,6 +181,21 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	filteringEnabled, err := parseFilteringEnabled(doc.FilteringEnabled)
+	if err != nil {
+		return nil, err
+	}
+
+	dnsListenAddress, err := parseDNSListenAddress(doc.DNSListenAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	dnsUpstreamServers, err := parseDNSUpstreamServers(doc.DNSUpstreamServers, filteringEnabled)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		OrchestratorURL:    orchestratorURL,
 		LabKey:             labKey,
@@ -156,6 +205,10 @@ func Load(path string) (*Config, error) {
 		LogFormat:          logFormat,
 		PropagationAddress: propagationAddress,
 		RulesStatePath:     rulesStatePath,
+		FilteringEnabled:   filteringEnabled,
+		DNSListenAddress:   dnsListenAddress,
+		DNSUpstreamServers: dnsUpstreamServers,
+		NftBinaryPath:      nftBinaryPath(doc.NftBinaryPath),
 	}, nil
 }
 
@@ -314,4 +367,116 @@ func parseRulesStatePath(raw string) (string, error) {
 	}
 
 	return value, nil
+}
+
+// parseFilteringEnabled parses the local filtering switch, falling back to the
+// default when it is unset.
+func parseFilteringEnabled(raw string) (bool, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultFilteringEnabled, nil
+	}
+
+	enabled, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		return false, fmt.Errorf("invalid filtering_enabled: %w", err)
+	}
+
+	return enabled, nil
+}
+
+// parseDNSListenAddress parses the embedded DNS listen address, falling back to
+// the default when it is unset. An explicit value must be a host:port pair with
+// a port within [1, 65535].
+func parseDNSListenAddress(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultDNSListenAddress, nil
+	}
+
+	_, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", fmt.Errorf("invalid dns_listen_address %q: %w", value, err)
+	}
+
+	number, err := strconv.Atoi(port)
+	if err != nil {
+		return "", fmt.Errorf("invalid dns_listen_address %q: port must be a number", value)
+	}
+
+	if number < 1 || number > 65535 {
+		return "", fmt.Errorf("invalid dns_listen_address %q: port must be between 1 and 65535", value)
+	}
+
+	return value, nil
+}
+
+// parseDNSUpstreamServers validates the explicit upstream servers, which must
+// each be an IP address. When none are provided and filtering is enabled, the
+// nameserver entries of ResolvConfPath are used instead, and it is an error for
+// them to be absent as well.
+func parseDNSUpstreamServers(raw []string, filteringEnabled bool) ([]string, error) {
+	if len(raw) == 0 {
+		if !filteringEnabled {
+			return nil, nil
+		}
+
+		servers, err := readResolvNameservers(ResolvConfPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read default dns_upstream_servers: %w", err)
+		}
+
+		if len(servers) == 0 {
+			return nil, fmt.Errorf("dns_upstream_servers is required: no nameserver entries found in %s", ResolvConfPath)
+		}
+
+		return servers, nil
+	}
+
+	servers := make([]string, 0, len(raw))
+	for _, entry := range raw {
+		value := strings.TrimSpace(entry)
+		if net.ParseIP(value) == nil {
+			return nil, fmt.Errorf("invalid dns_upstream_servers entry %q: must be an IP address", entry)
+		}
+
+		servers = append(servers, value)
+	}
+
+	return servers, nil
+}
+
+// readResolvNameservers returns the IP addresses listed in the nameserver
+// entries of the resolver configuration file at the provided path, skipping
+// entries that are not valid IP addresses.
+func readResolvNameservers(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var servers []string
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "nameserver" {
+			continue
+		}
+
+		if net.ParseIP(fields[1]) != nil {
+			servers = append(servers, fields[1])
+		}
+	}
+
+	return servers, nil
+}
+
+// nftBinaryPath resolves the nft executable path, falling back to the default
+// when it is unset.
+func nftBinaryPath(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return defaultNftBinaryPath
+	}
+
+	return value
 }
