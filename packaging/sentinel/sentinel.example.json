@@ -1,0 +1,13 @@
+{
+  "orchestrator_url": "http://ORCHESTRATOR_HOST:8080",
+  "lab_key_path": "/etc/aegis/lab.key",
+  "request_timeout": "10s",
+  "log_level": "info",
+  "log_format": "text",
+  "propagation_address": "ORCHESTRATOR_HOST:9090",
+  "rules_state_path": "/var/lib/aegis/rules.json",
+  "filtering_enabled": "true",
+  "dns_listen_address": "127.0.0.1:53",
+  "dns_upstream_servers": ["UPSTREAM_DNS_IP"],
+  "nft_binary_path": "nft"
+}
