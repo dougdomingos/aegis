@@ -1,0 +1,27 @@
+info:
+  name: 09 - Link Machine with Inexistent Machine
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/groups/lab-one/machines"
+  body:
+    type: json
+    data: |-
+      {
+        "machine_id": 999
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "404"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

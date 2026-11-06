@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package aegis.propagation.v1;
+
+option go_package = "dougdomingos.com/aegis/pkg/pb;pb";
+
+service Propagation {
+  rpc Connect(stream Ack) returns (stream ServerMessage);
+}
+
+message Ack {
+  int64 sequence = 1;
+  AckStatus status = 2;
+  string reason = 3;
+}
+
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  ACK_STATUS_ACKED = 1;
+  ACK_STATUS_NACKED = 2;
+}
+
+message ServerMessage {
+  string epoch = 1;
+  int64 sequence = 2;
+  int64 machine_id = 3;
+  oneof payload {
+    PolicyPackage policy = 4;
+    Revoke revoke = 5;
+  }
+}
+
+message PolicyPackage {
+  int64 policy_id = 1;
+  string policy_name = 2;
+  int32 policy_version = 3;
+  repeated Rule rules = 4;
+  string policy_type = 5;
+}
+
+message Revoke {}
+
+message Rule {
+  string type = 1;
+  string value = 2;
+  optional string protocol = 3;
+  optional int32 port = 4;
+}

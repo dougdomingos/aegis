@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# Binary output directory
+bin/
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -33,3 +36,5 @@ go.work.sum
 
 # Auto-generated protobuf code
 pkg/pb/**
+# VM test suite state (throwaway keys, binaries)
+e2e/vm/.state/

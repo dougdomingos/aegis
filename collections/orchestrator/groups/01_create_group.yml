@@ -1,0 +1,27 @@
+info:
+  name: 01 - Create Group
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/groups"
+  body:
+    type: json
+    data: |-
+      {
+        "Name": "lab1"
+      }
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

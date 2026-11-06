@@ -1,0 +1,103 @@
+name: CI - Tests and Coverage
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/ci.yml"
+      - "e2e/**"
+      - ".dockerignore"
+
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "proto/**"
+      - "Makefile"
+      - ".github/workflows/ci.yml"
+      - "e2e/**"
+      - ".dockerignore"
+
+  # Lets other workflows (the release pipeline) gate on the full suite.
+  workflow_call:
+
+jobs:
+  test:
+    name: Run Tests & Check Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install protobuf toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests with coverage
+        run: make coverage
+
+      - name: Verify Minimum Code Coverage (75%)
+        run: |
+          # Calculate total coverage percentage
+          COVERAGE=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
+
+          echo "Current Total Coverage: ${COVERAGE}%"
+
+          # Compare coverage against target threshold
+          REQUIRED_COVERAGE=75.0
+
+          IS_SUFFICIENT=$(awk -v cov="$COVERAGE" -v req="$REQUIRED_COVERAGE" 'BEGIN {print (cov >= req)}')
+
+          if [ "$IS_SUFFICIENT" -eq 1 ]; then
+            echo "SUCCESS: Coverage (${COVERAGE}%) meets or exceeds the threshold (${REQUIRED_COVERAGE}%)."
+          else
+            echo "ERROR: Coverage (${COVERAGE}%) is below the required minimum (${REQUIRED_COVERAGE}%)."
+            exit 1
+          fi
+
+      - name: Display Detailed Coverage Breakdown (Optional)
+        if: always()
+        run: go tool cover -func=coverage.out
+
+  e2e:
+    name: Run E2E Suite (Testcontainers)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install protobuf toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Run end-to-end suite
+        run: make e2e

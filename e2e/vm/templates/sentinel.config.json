@@ -1,0 +1,9 @@
+{
+  "orchestrator_url": "http://192.168.150.10:8080",
+  "lab_key_path": "/etc/aegis/lab.key",
+  "heartbeat_interval": "5s",
+  "propagation_address": "192.168.150.10:9090",
+  "rules_state_path": "/var/lib/aegis/rules.json",
+  "filtering_enabled": "true",
+  "dns_upstream_servers": ["192.168.150.30"]
+}

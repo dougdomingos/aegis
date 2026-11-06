@@ -1,0 +1,4 @@
+{
+  "DnsOverHttpsMode": "secure",
+  "DnsOverHttpsTemplates": "https://192.168.150.30/dns-query"
+}

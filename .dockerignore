@@ -1,0 +1,10 @@
+.git
+.github
+.superpowers
+docs
+bin
+collections
+coverage.out
+examples/sentinel.config.json
+e2e/containers/*_test.go
+e2e/vm
