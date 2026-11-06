@@ -1,0 +1,115 @@
+name: Release - Orchestrator Image
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  # Gate: the release is only built and published if the full CI suite
+  # (unit tests with coverage, and the e2e suite) passes on the release tag.
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Smoke Test & Publish Orchestrator Image
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local, for smoke test)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/orchestrator/Dockerfile
+          load: true
+          push: false
+          tags: aegis-orchestrator:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run smoke test
+        run: e2e/image/smoke.sh aegis-orchestrator:smoke
+
+      - name: Compute release tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/aegis-orchestrator
+          flavor: |
+            latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push the smoke-tested image
+        # Re-tags and pushes the exact image that passed the smoke test, so
+        # the published bytes are the tested bytes.
+        run: |
+          if [ -z "${{ steps.meta.outputs.tags }}" ]; then
+            echo "::error::No image tags computed; the release tag must be semver (e.g. v1.2.3)."
+            exit 1
+          fi
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "pushing $tag"
+            docker tag aegis-orchestrator:smoke "$tag"
+            docker push "$tag"
+          done <<< "${{ steps.meta.outputs.tags }}"
+
+  sentinel:
+    name: Build & Upload Sentinel Binary
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Install protobuf toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Generate gRPC code
+        run: make proto
+
+      - name: Package Sentinel (linux/amd64)
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG#v}"
+          packaging/sentinel/package.sh "$VERSION" dist
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "$TAG" dist/*.tar.gz dist/SHA256SUMS dist/install.sh --clobber
