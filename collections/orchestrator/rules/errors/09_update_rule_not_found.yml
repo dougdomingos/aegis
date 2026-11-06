@@ -5,12 +5,12 @@ info:
 
 http:
   method: PATCH
-  url: "{{baseUrl}}/rules/9999"
+  url: "{{baseUrl}}/policies/{{policyID}}/rules/9999"
   body:
     type: json
     data: |-
       {
-        "action": "DENY"
+        "value": "blocked.com"
       }
 
 runtime:

@@ -5,7 +5,7 @@ info:
 
 http:
   method: DELETE
-  url: "{{baseUrl}}/rules/1"
+  url: "{{baseUrl}}/policies/{{policyID}}/rules/1"
 
 runtime:
   assertions:

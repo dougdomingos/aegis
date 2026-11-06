@@ -10,7 +10,8 @@ http:
     type: json
     data: |-
       {
-        "name": ""
+        "name": "",
+        "type": "WHITELIST"
       }
 
 runtime:

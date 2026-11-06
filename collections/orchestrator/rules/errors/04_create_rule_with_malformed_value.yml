@@ -5,13 +5,12 @@ info:
 
 http:
   method: POST
-  url: "{{baseUrl}}/rules"
+  url: "{{baseUrl}}/policies/{{policyID}}/rules"
   body:
     type: json
     data: |-
       {
         "rule_type": "DOMAIN",
-        "action": "ALLOW",
         "value": "thisisnotadomain"
       }
 

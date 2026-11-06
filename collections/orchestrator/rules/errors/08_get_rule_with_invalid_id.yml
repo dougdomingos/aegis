@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/rules/abc"
+  url: "{{baseUrl}}/policies/{{policyID}}/rules/abc"
 
 runtime:
   assertions:

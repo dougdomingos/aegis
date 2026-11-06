@@ -10,7 +10,8 @@ http:
     type: json
     data: |-
       {
-        "name": "Test Policy"
+        "name": "Test Policy",
+        "type": "WHITELIST"
       }
 
 runtime:
