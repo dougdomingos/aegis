@@ -748,6 +748,124 @@ func TestGroupService_RemoveGroup_WhenDeleteFails_DoesNotRevoke(t *testing.T) {
 }
 
 // ============================================================================
+// ListGroupMachines
+// ============================================================================
+
+func TestGroupService_ListGroupMachines_WithMachinesInGroup_ReturnsOnlyThoseMachines(t *testing.T) {
+	ctx, groupStore, machineStore, propagationStore, svc := arrangeGroupListMachinesServiceTest(t)
+	if _, err := groupStore.Create(ctx, "lab1"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+	if _, err := groupStore.Create(ctx, "lab2"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+	first, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	second, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.12", Name: "lcc1-012"})
+	other, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.2.11", Name: "lcc2-011"})
+	for _, id := range []int64{first.ID, second.ID} {
+		if _, err := svc.LinkMachine(ctx, "lab1", id); err != nil {
+			t.Fatalf("failed to link machine %d: %v", id, err)
+		}
+	}
+	if _, err := svc.LinkMachine(ctx, "lab2", other.ID); err != nil {
+		t.Fatalf("failed to link machine %d: %v", other.ID, err)
+	}
+	sentAt := time.Date(2026, 1, 1, 11, 59, 0, 0, time.UTC)
+	ackedAt := sentAt.Add(120 * time.Millisecond)
+	propagationStore.Rows[first.ID] = []domain.Propagation{
+		{MachineID: first.ID, Sequence: 1, Status: domain.PropagationAcked, SentAt: &sentAt, AckedAt: &ackedAt},
+	}
+
+	res, err := svc.ListGroupMachines(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected 2 machines, got %d", len(res))
+	}
+	for _, machine := range res {
+		if machine.ID == other.ID {
+			t.Errorf("expected machine %d from another group to be excluded", other.ID)
+		}
+		if machine.ID != first.ID {
+			continue
+		}
+		if machine.Propagation.Status != string(domain.PropagationAcked) {
+			t.Errorf("expected propagation status %q, got %q", domain.PropagationAcked, machine.Propagation.Status)
+		}
+		if machine.Propagation.DurationMS == nil || *machine.Propagation.DurationMS != 120 {
+			t.Errorf("expected propagation duration 120ms, got %v", machine.Propagation.DurationMS)
+		}
+	}
+}
+
+func TestGroupService_ListGroupMachines_WithEmptyGroup_ReturnsEmptySlice(t *testing.T) {
+	ctx, groupStore, _, _, svc := arrangeGroupListMachinesServiceTest(t)
+	if _, err := groupStore.Create(ctx, "lab1"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+
+	res, err := svc.ListGroupMachines(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if res == nil || len(res) != 0 {
+		t.Errorf("expected non-nil empty slice, got %v", res)
+	}
+}
+
+func TestGroupService_ListGroupMachines_WithMachineWithoutPropagation_ReturnsPendingPropagation(t *testing.T) {
+	ctx, groupStore, machineStore, _, svc := arrangeGroupListMachinesServiceTest(t)
+	if _, err := groupStore.Create(ctx, "lab1"); err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+	machine, _ := machineStore.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	if _, err := svc.LinkMachine(ctx, "lab1", machine.ID); err != nil {
+		t.Fatalf("failed to link machine: %v", err)
+	}
+
+	res, err := svc.ListGroupMachines(ctx, "lab1")
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected 1 machine, got %d", len(res))
+	}
+	if res[0].Propagation.Status != string(domain.PropagationPending) {
+		t.Errorf("expected propagation status %q, got %q", domain.PropagationPending, res[0].Propagation.Status)
+	}
+}
+
+func TestGroupService_ListGroupMachines_WithInexistentGroup_ReturnsErrGroupNotFound(t *testing.T) {
+	ctx, _, _, _, svc := arrangeGroupListMachinesServiceTest(t)
+
+	res, err := svc.ListGroupMachines(ctx, "ghost")
+
+	if !errors.Is(err, groupErrors.ErrGroupNotFound) {
+		t.Errorf("expected error %q, got %v", groupErrors.ErrGroupNotFound, err)
+	}
+	if res != nil {
+		t.Errorf("expected nil result on error, got %v", res)
+	}
+}
+
+func TestGroupService_ListGroupMachines_WithBlankName_ReturnsErrGroupNameRequired(t *testing.T) {
+	ctx, _, _, _, svc := arrangeGroupListMachinesServiceTest(t)
+
+	res, err := svc.ListGroupMachines(ctx, "  ")
+
+	if !errors.Is(err, groupErrors.ErrGroupNameRequired) {
+		t.Errorf("expected error %q, got %v", groupErrors.ErrGroupNameRequired, err)
+	}
+	if res != nil {
+		t.Errorf("expected nil result on error, got %v", res)
+	}
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -769,7 +887,7 @@ func arrangeGroupMachineServiceTest(t *testing.T) (context.Context, *MockGroupSt
 	policyStore := NewMockPolicyStore()
 	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, NewMockPropagationStore(), nil, time.Minute, now)
 
 	return context.Background(), groupStore, machineStore, *svc
 }
@@ -784,7 +902,7 @@ func arrangeGroupPolicyServiceTest(t *testing.T) (context.Context, *MockGroupSto
 	policyStore := NewMockPolicyStore()
 	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, nil, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, NewMockPropagationStore(), nil, time.Minute, now)
 
 	return context.Background(), groupStore, policyStore, ruleStore, *svc
 }
@@ -805,7 +923,7 @@ func arrangeNotifiedGroupMachineServiceTest(t *testing.T) (context.Context, *Moc
 	policyStore := NewMockPolicyStore()
 	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, notifier, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, NewMockPropagationStore(), notifier, time.Minute, now)
 
 	return context.Background(), groupStore, machineStore, *svc, notifier, &log
 }
@@ -824,7 +942,22 @@ func arrangeNotifiedGroupPolicyServiceTest(t *testing.T) (context.Context, *Mock
 	policyStore := NewMockPolicyStore()
 	ruleStore := NewMockRuleStore()
 	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
-	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, notifier, time.Minute, now)
+	svc := service.NewGroupService(groupStore, machineStore, policyStore, ruleStore, NewMockPropagationStore(), notifier, time.Minute, now)
 
 	return context.Background(), groupStore, policyStore, ruleStore, *svc, &log
+}
+
+// arrangeGroupListMachinesServiceTest initializes a group service with mocked
+// group, machine and propagation stores, exposing the propagation store so
+// tests can seed latest propagation rows.
+func arrangeGroupListMachinesServiceTest(t *testing.T) (context.Context, *MockGroupStore, *MockMachineStore, *MockPropagationStore, service.GroupService) {
+	t.Helper()
+
+	groupStore := NewMockGroupStore()
+	machineStore := NewMockMachineStore()
+	propagationStore := NewMockPropagationStore()
+	now := func() time.Time { return time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC) }
+	svc := service.NewGroupService(groupStore, machineStore, NewMockPolicyStore(), NewMockRuleStore(), propagationStore, nil, time.Minute, now)
+
+	return context.Background(), groupStore, machineStore, propagationStore, *svc
 }

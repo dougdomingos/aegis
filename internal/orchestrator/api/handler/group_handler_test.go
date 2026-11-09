@@ -417,6 +417,65 @@ func TestGroupHandler_UnlinkPolicy_WithInexistentGroup_ReturnsStatus404(t *testi
 }
 
 // ============================================================================
+// ListMachines (GET /groups/{name}/machines)
+// ============================================================================
+
+func TestGroupHandler_ListMachines_WithMachines_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		listMachinesFn: func(_ context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+			return []schemas.MachineOutputSchema{machineOutput(1, "lcc1-011", "10.0.1.11")}, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups/lab1/machines", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_ListMachines_WithEmptyGroup_ReturnsStatus200(t *testing.T) {
+	mock := &mockGroupService{
+		listMachinesFn: func(_ context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+			return nil, nil
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups/lab1/machines", nil)
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestGroupHandler_ListMachines_WithInexistentGroup_ReturnsStatus404(t *testing.T) {
+	mock := &mockGroupService{
+		listMachinesFn: func(_ context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNotFound
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups/unknown/machines", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestGroupHandler_ListMachines_WithBlankName_ReturnsStatus400(t *testing.T) {
+	mock := &mockGroupService{
+		listMachinesFn: func(_ context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+			return nil, groupErrors.ErrGroupNameRequired
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups/%20/machines", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestGroupHandler_ListMachines_WithServiceFailure_ReturnsStatus500(t *testing.T) {
+	mock := &mockGroupService{
+		listMachinesFn: func(_ context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+			return nil, errors.New("database unavailable")
+		},
+	}
+
+	rec := performRequest(t, setupRouter(t, mock), http.MethodGet, "/groups/lab1/machines", nil)
+	assertStatusCode(t, rec, http.StatusInternalServerError)
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 

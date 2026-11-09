@@ -30,6 +30,10 @@ type GroupService struct {
 	// a policy has rules before it is linked to a group.
 	ruleStore domain.RuleStore
 
+	// propagations provides the latest propagation of each machine, attached
+	// to the machines listed by group.
+	propagations domain.PropagationStore
+
 	// notifier propagates group membership changes to the distribution
 	// pipeline. It may be nil, disabling notifications.
 	notifier PropagationNotifier
@@ -44,12 +48,13 @@ type GroupService struct {
 
 // NewGroupService creates a new service instance with the provided store
 // managers and propagation notifier. The notifier may be nil.
-func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, ruleStore domain.RuleStore, notifier PropagationNotifier, stalenessGrace time.Duration, now func() time.Time) *GroupService {
+func NewGroupService(store domain.GroupStore, machineStore domain.MachineStore, policyStore domain.PolicyStore, ruleStore domain.RuleStore, propagations domain.PropagationStore, notifier PropagationNotifier, stalenessGrace time.Duration, now func() time.Time) *GroupService {
 	return &GroupService{
 		store:          store,
 		machineStore:   machineStore,
 		policyStore:    policyStore,
 		ruleStore:      ruleStore,
+		propagations:   propagations,
 		notifier:       notifier,
 		stalenessGrace: stalenessGrace,
 		now:            now,
@@ -232,6 +237,53 @@ func (service *GroupService) LinkMachine(ctx context.Context, groupName string, 
 	service.notifyMachine(ctx, machineID)
 
 	return mapMachineToOutputSchema(linked, service.now(), service.stalenessGrace), nil
+}
+
+// ListGroupMachines returns the machines linked to the group whose name matches
+// the argument, each with its latest propagation. A machine that never
+// received a propagation reports the PENDING representation.
+func (service *GroupService) ListGroupMachines(ctx context.Context, groupName string) ([]schemas.MachineOutputSchema, error) {
+	if strings.TrimSpace(groupName) == "" {
+		return nil, errors.ErrGroupNameRequired
+	}
+
+	group, err := service.store.GetByName(ctx, groupName)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, errors.ErrGroupNotFound
+	}
+
+	machines, err := service.machineStore.ListByGroup(ctx, group.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	propagations, err := service.propagations.ListLatest(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	latestByMachine := make(map[int64]domain.Propagation, len(propagations))
+	for _, propagation := range propagations {
+		latestByMachine[propagation.MachineID] = propagation
+	}
+
+	output := make([]schemas.MachineOutputSchema, 0, len(machines))
+	for i := range machines {
+		schema := mapMachineToOutputSchema(&machines[i], service.now(), service.stalenessGrace)
+
+		if propagation, exists := latestByMachine[machines[i].ID]; exists {
+			schema.Propagation = mapPropagationToOutputSchema(&propagation)
+		} else {
+			schema.Propagation = pendingPropagationOutput()
+		}
+
+		output = append(output, *schema)
+	}
+
+	return output, nil
 }
 
 // UnlinkMachine removes the association between the machine whose ID matches

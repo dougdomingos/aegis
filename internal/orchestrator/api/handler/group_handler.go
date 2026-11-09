@@ -19,6 +19,7 @@ type GroupServiceInterface interface {
 	ListAllGroups(ctx context.Context) ([]schemas.GroupOutputSchema, error)
 	ChangeGroupName(ctx context.Context, p schemas.ChangeGroupNameSchema) (*schemas.GroupOutputSchema, error)
 	RemoveGroup(ctx context.Context, p schemas.RemoveGroupSchema) error
+	ListGroupMachines(ctx context.Context, groupName string) ([]schemas.MachineOutputSchema, error)
 	LinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
 	UnlinkMachine(ctx context.Context, groupName string, machineID int64) (*schemas.MachineOutputSchema, error)
 	LinkPolicy(ctx context.Context, groupName, policyName string) (*schemas.GroupOutputSchema, error)
@@ -43,6 +44,7 @@ func (handler *GroupHandler) RegisterRoutes(r chi.Router) {
 		r.Get("/", handler.List)
 		r.Get("/{name}", handler.GetByName)
 		r.Patch("/rename", handler.Rename)
+		r.Get("/{name}/machines", handler.ListMachines)
 		r.Post("/{name}/machines", handler.LinkMachine)
 		r.Delete("/{name}/machines/{machineID}", handler.UnlinkMachine)
 		r.Post("/{name}/policy", handler.LinkPolicy)
@@ -102,6 +104,25 @@ func (handler *GroupHandler) GetByName(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.EncodeToJSON(w, http.StatusOK, res)
+}
+
+func (handler *GroupHandler) ListMachines(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+
+	machines, err := handler.service.ListGroupMachines(r.Context(), name)
+	if err != nil {
+		utils.MapByError(w, err, map[error]int{
+			errors.ErrGroupNameRequired: http.StatusBadRequest,
+			errors.ErrGroupNotFound:     http.StatusNotFound,
+		})
+		return
+	}
+
+	if machines == nil {
+		machines = []schemas.MachineOutputSchema{}
+	}
+
+	utils.EncodeToJSON(w, http.StatusOK, machines)
 }
 
 func (handler *GroupHandler) Rename(w http.ResponseWriter, r *http.Request) {
