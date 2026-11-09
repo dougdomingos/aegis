@@ -103,8 +103,10 @@ type PropagationStore interface {
 	MarkFailed(ctx context.Context, machineID, sequence int64, reason string) error
 
 	// Acknowledge applies the Sentinel's response to the row of the given
-	// machine and sequence. A missing row is not an error: a late
-	// acknowledgement for a superseded message is simply ignored.
+	// machine and sequence, but only while the row is SENT. A missing row, or
+	// one already settled (acknowledged, rejected or failed), is not an error:
+	// a late or duplicate acknowledgement is simply ignored and leaves the row
+	// untouched.
 	Acknowledge(ctx context.Context, machineID, sequence int64, status PropagationStatus, reason string, at time.Time) error
 
 	// LatestByMachine retrieves the row with the highest sequence for the

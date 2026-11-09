@@ -27,7 +27,8 @@ const (
 	queryMarkPropagationSent    = "UPDATE propagations SET status = 'SENT', sent_at = ? WHERE machine_id = ? AND sequence = ?"
 	queryMarkPropagationFailed  = "UPDATE propagations SET status = 'FAILED', nack_reason = ? WHERE machine_id = ? AND sequence = ?"
 	queryAcknowledgePropagation = `UPDATE propagations
-		SET status = ?, acked_at = ?, nack_reason = ? WHERE machine_id = ? AND sequence = ?`
+		SET status = ?, acked_at = ?, nack_reason = ?
+		WHERE machine_id = ? AND sequence = ? AND status = 'SENT'`
 	queryLatestPropagationByMachine = `SELECT id, machine_id, sequence, kind, policy_id, policy_name, policy_version,
 		policy_type, status, sent_at, acked_at, nack_reason, created_at
 		FROM propagations WHERE machine_id = ? ORDER BY sequence DESC LIMIT 1`

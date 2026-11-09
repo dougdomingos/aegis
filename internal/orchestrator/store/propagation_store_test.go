@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -210,6 +211,49 @@ func TestPropagationStore_Acknowledge_WithMatchingRow_SetsStatusAndTimestamps(t 
 			}
 			if latest.SentAt == nil || !latest.SentAt.Equal(sentAt) {
 				t.Errorf("SentAt = %v, want %v", latest.SentAt, sentAt)
+			}
+		})
+	}
+}
+
+func TestPropagationStore_Acknowledge_WithSettledRow_LeavesRowUntouched(t *testing.T) {
+	testCases := map[string]func(ctx context.Context, propagationStore *store.PropagationStore) error{
+		"already acknowledged": func(ctx context.Context, propagationStore *store.PropagationStore) error {
+			return propagationStore.Acknowledge(ctx, 101, 1, domain.PropagationAcked, "", time.Date(2026, 1, 1, 12, 0, 1, 0, time.UTC))
+		},
+		"failed send": func(ctx context.Context, propagationStore *store.PropagationStore) error {
+			return propagationStore.MarkFailed(ctx, 101, 1, "stream closed")
+		},
+	}
+
+	for name, settle := range testCases {
+		t.Run(name, func(t *testing.T) {
+			ctx, propagationStore := arrangeStoreTest(t, store.NewPropagationStore)
+			if _, err := propagationStore.Create(ctx, packagePropagation(101), encodePayload); err != nil {
+				t.Fatalf("Create() = %v, want nil", err)
+			}
+			if err := propagationStore.MarkSent(ctx, 101, 1, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)); err != nil {
+				t.Fatalf("MarkSent() = %v, want nil", err)
+			}
+			if err := settle(ctx, propagationStore); err != nil {
+				t.Fatalf("settle = %v, want nil", err)
+			}
+			before, _ := propagationStore.LatestByMachine(ctx, 101)
+
+			err := propagationStore.Acknowledge(ctx, 101, 1, domain.PropagationNacked, "late", time.Date(2026, 1, 1, 12, 5, 0, 0, time.UTC))
+			after, _ := propagationStore.LatestByMachine(ctx, 101)
+
+			if err != nil {
+				t.Errorf("Acknowledge() = %v, want nil", err)
+			}
+			if after.Status != before.Status {
+				t.Errorf("Status = %q, want %q", after.Status, before.Status)
+			}
+			if after.NackReason != before.NackReason {
+				t.Errorf("NackReason = %q, want %q", after.NackReason, before.NackReason)
+			}
+			if (after.AckedAt == nil) != (before.AckedAt == nil) || (after.AckedAt != nil && !after.AckedAt.Equal(*before.AckedAt)) {
+				t.Errorf("AckedAt = %v, want %v", after.AckedAt, before.AckedAt)
 			}
 		})
 	}
