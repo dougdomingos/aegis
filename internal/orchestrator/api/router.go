@@ -77,6 +77,7 @@ func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, 
 	}
 
 	registerHandlers(router,
+		handler.NewHealthHandler(),
 		handler.NewGroupHandler(service.NewGroupService(
 			groupStore, machineStore, policyStore, ruleStore, propagationStore, propagationService, cfg.StalenessGrace, time.Now)),
 		handler.NewPolicyHandler(service.NewPolicyService(policyStore, propagationService)),

@@ -170,6 +170,24 @@ func TestNewRouter_WithInexistentGroup_ListGroupMachinesReturnsStatus404(t *test
 	}
 }
 
+func TestNewRouter_WithHealthRequest_ReturnsOkBody(t *testing.T) {
+	router := arrangeRouterTest(t)
+
+	rec := serveJSON(router, http.MethodGet, "/health", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if len(body) != 1 || body["status"] != "ok" {
+		t.Errorf("expected body %v, got %v", map[string]string{"status": "ok"}, body)
+	}
+}
+
 // initiateChallenge starts an authentication challenge for the provided IP and
 // returns the issued nonce.
 func initiateChallenge(t *testing.T, router http.Handler, ip string) string {
