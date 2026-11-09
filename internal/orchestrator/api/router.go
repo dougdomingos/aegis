@@ -11,6 +11,7 @@ import (
 	"dougdomingos.com/aegis/internal/orchestrator/api/middleware"
 	"dougdomingos.com/aegis/internal/orchestrator/config"
 	"dougdomingos.com/aegis/internal/orchestrator/domain"
+	"dougdomingos.com/aegis/internal/orchestrator/metrics"
 	"dougdomingos.com/aegis/internal/orchestrator/service"
 	"dougdomingos.com/aegis/internal/orchestrator/store"
 	"github.com/go-chi/chi/v5"
@@ -69,6 +70,9 @@ func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, 
 	propagationService := service.NewPropagationService(
 		machineStore, groupStore, policyStore, ruleStore, propagationStore, logger, time.Now)
 
+	propagationMetrics := metrics.NewPropagationMetrics()
+	propagationService.SetMetrics(propagationMetrics)
+
 	machineService := service.NewMachineService(
 		machineStore, propagationStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
 
@@ -78,6 +82,7 @@ func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, 
 
 	registerHandlers(router,
 		handler.NewHealthHandler(),
+		handler.NewMetricsHandler(propagationMetrics.Handler()),
 		handler.NewGroupHandler(service.NewGroupService(
 			groupStore, machineStore, policyStore, ruleStore, propagationStore, propagationService, cfg.StalenessGrace, time.Now)),
 		handler.NewPolicyHandler(service.NewPolicyService(policyStore, propagationService)),

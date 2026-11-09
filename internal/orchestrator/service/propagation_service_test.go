@@ -1,8 +1,12 @@
 package service_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -476,6 +480,217 @@ func TestPropagationService_Acknowledge_WithForeignSequence_LeavesRowsUntouched(
 	}
 }
 
+func TestPropagationService_Acknowledge_WithAckedPackage_RecordsAckedWithLatency(t *testing.T) {
+	fixture, metrics, clock := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 1, domain.PropagationSent)
+
+	clock.advance(150 * time.Millisecond)
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	want := []MetricCall{{Group: "group-10.0.0.1", Status: "acked", Latency: 150 * time.Millisecond}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
+func TestPropagationService_Acknowledge_WithNackedPackage_RecordsNacked(t *testing.T) {
+	fixture, metrics, clock := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 1, domain.PropagationSent)
+
+	clock.advance(80 * time.Millisecond)
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckNacked, Reason: "invalid rule"})
+
+	want := []MetricCall{{Group: "group-10.0.0.1", Status: "nacked", Latency: 80 * time.Millisecond}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
+func TestPropagationService_Acknowledge_WithSupersededSequence_RecordsNothing(t *testing.T) {
+	fixture, metrics, _ := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 2, domain.PropagationSent)
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	assertMetricCalls(t, metrics.Calls(), nil)
+}
+
+func TestPropagationService_Acknowledge_WithRevokeKind_RecordsNothing(t *testing.T) {
+	fixture, metrics, _ := arrangeMetricsPropagationTest(t)
+	machine := fixture.addMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 1, domain.PropagationSent)
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	assertMetricCalls(t, metrics.Calls(), nil)
+}
+
+func TestPropagationService_Acknowledge_WithMachineWithoutGroup_RecordsUnassigned(t *testing.T) {
+	fixture, metrics, clock := arrangeMetricsPropagationTest(t)
+	machine := fixture.addMachine("10.0.0.1")
+	sentAt := clock.now()
+	fixture.propagations.SeedRows(machine.ID,
+		domain.Propagation{MachineID: machine.ID, Sequence: 1, Kind: domain.PropagationPackage, Status: domain.PropagationSent, SentAt: &sentAt})
+
+	clock.advance(40 * time.Millisecond)
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	want := []MetricCall{{Group: "unassigned", Status: "acked", Latency: 40 * time.Millisecond}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
+func TestPropagationService_Acknowledge_WithDuplicateAck_RecordsOnce(t *testing.T) {
+	fixture, metrics, clock := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 1, domain.PropagationSent)
+	clock.advance(150 * time.Millisecond)
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+	clock.advance(time.Second)
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	want := []MetricCall{{Group: "group-10.0.0.1", Status: "acked", Latency: 150 * time.Millisecond}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
+func TestPropagationService_Acknowledge_WithRowWithoutSentAt_RecordsNothing(t *testing.T) {
+	fixture, metrics, _ := arrangeMetricsPropagationTest(t)
+	machine := fixture.addMachine("10.0.0.1")
+	fixture.propagations.SeedRows(machine.ID,
+		domain.Propagation{MachineID: machine.ID, Sequence: 1, Kind: domain.PropagationPackage, Status: domain.PropagationSent})
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	assertMetricCalls(t, metrics.Calls(), nil)
+}
+
+func TestPropagationService_Acknowledge_WithCancelledContext_StillResolvesGroup(t *testing.T) {
+	fixture, metrics, clock := arrangeMetricsPropagationTest(t)
+	machine := fixture.addMachine("10.0.0.1")
+	fixture.linkMachine(machine, fixture.addGroup("lab1"))
+	sentAt := clock.now()
+	fixture.propagations.SeedRows(machine.ID,
+		domain.Propagation{MachineID: machine.ID, Sequence: 1, Kind: domain.PropagationPackage, Status: domain.PropagationSent, SentAt: &sentAt})
+	cancelled, cancel := context.WithCancel(fixture.ctx)
+	cancel()
+
+	fixture.service.Acknowledge(cancelled, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	want := []MetricCall{{Group: "lab1", Status: "acked"}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
+func TestPropagationService_Acknowledge_WithGroupLookupFailure_LogsAndRecordsUnassigned(t *testing.T) {
+	fixture, _, clock := arrangeMetricsPropagationTest(t)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	metrics := &MockPropagationMetrics{}
+	svc := service.NewPropagationService(
+		fixture.machines, fixture.groups, fixture.policies, fixture.rules, fixture.propagations, logger, clock.now)
+	svc.SetMetrics(metrics)
+	machine := fixture.addMachine("10.0.0.1")
+	sentAt := clock.now()
+	fixture.propagations.SeedRows(machine.ID,
+		domain.Propagation{MachineID: machine.ID, Sequence: 1, Kind: domain.PropagationPackage, Status: domain.PropagationSent, SentAt: &sentAt})
+	fixture.machines.StoreErr = errors.New("database unavailable")
+
+	svc.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	assertMetricCalls(t, metrics.Calls(), []MetricCall{{Group: "unassigned", Status: "acked"}})
+	if !strings.Contains(logs.String(), "failed to resolve machine group for metrics") {
+		t.Errorf("logs = %q, want a warning about the failed group lookup", logs.String())
+	}
+}
+
+func TestPropagationService_Acknowledge_WithMachineWithoutGroup_DoesNotLogLookupFailure(t *testing.T) {
+	fixture, _, clock := arrangeMetricsPropagationTest(t)
+	var logs bytes.Buffer
+	svc := service.NewPropagationService(
+		fixture.machines, fixture.groups, fixture.policies, fixture.rules, fixture.propagations,
+		slog.New(slog.NewTextHandler(&logs, nil)), clock.now)
+	svc.SetMetrics(&MockPropagationMetrics{})
+	machine := fixture.addMachine("10.0.0.1")
+	sentAt := clock.now()
+	fixture.propagations.SeedRows(machine.ID,
+		domain.Propagation{MachineID: machine.ID, Sequence: 1, Kind: domain.PropagationPackage, Status: domain.PropagationSent, SentAt: &sentAt})
+
+	svc.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	if strings.Contains(logs.String(), "failed to resolve machine group for metrics") {
+		t.Errorf("logs = %q, want no warning for a machine that simply has no group", logs.String())
+	}
+}
+
+func TestPropagationService_Acknowledge_WithLateAckAfterFailedSend_RecordsOnlyFailed(t *testing.T) {
+	fixture, metrics, _ := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	sender.Err = errors.New("stream closed")
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForCondition(t, func() bool { return len(metrics.Calls()) > 0 }, propagationWaitTimeout)
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	want := []MetricCall{{Group: "group-10.0.0.1", Status: "failed"}}
+	assertMetricCalls(t, metrics.Calls(), want)
+	if row, _ := fixture.propagations.RowAt(machine.ID, 1); row.Status != domain.PropagationFailed {
+		t.Errorf("status = %q, want %q kept after a late acknowledgement", row.Status, domain.PropagationFailed)
+	}
+}
+
+func TestPropagationService_Acknowledge_WithoutMetrics_StillAppliesAck(t *testing.T) {
+	fixture := arrangePropagationServiceTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	fixture.start()
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+	waitForSend(t, sender.sent)
+	fixture.waitForRowStatus(machine.ID, 1, domain.PropagationSent)
+
+	fixture.service.Acknowledge(fixture.ctx, machine.ID, propagation.Ack{Sequence: 1, Status: propagation.AckAcked})
+
+	row, _ := fixture.propagations.RowAt(machine.ID, 1)
+	if row.Status != domain.PropagationAcked {
+		t.Errorf("status = %q, want %q", row.Status, domain.PropagationAcked)
+	}
+}
+
+func TestPropagationService_DeliverSnapshot_WhenSendFails_RecordsFailed(t *testing.T) {
+	fixture, metrics, _ := arrangeMetricsPropagationTest(t)
+	machine, _ := fixture.completeMachine("10.0.0.1")
+	sender := fixture.register(machine.ID)
+	sender.Err = errors.New("stream closed")
+	fixture.start()
+
+	fixture.service.DeliverSnapshot(fixture.ctx, machine.ID)
+
+	waitForCondition(t, func() bool { return len(metrics.Calls()) > 0 }, propagationWaitTimeout)
+	want := []MetricCall{{Group: "group-10.0.0.1", Status: "failed"}}
+	assertMetricCalls(t, metrics.Calls(), want)
+}
+
 func TestPropagationService_RevokeMachines_WithPolicy_RecordsPolicyMetadata(t *testing.T) {
 	fixture := arrangePropagationServiceTest(t)
 
@@ -558,6 +773,14 @@ type propagationFixture struct {
 func arrangePropagationServiceTest(t *testing.T) *propagationFixture {
 	t.Helper()
 
+	return arrangePropagationServiceTestAt(t, time.Now)
+}
+
+// arrangePropagationServiceTestAt builds a propagation service over fresh mock
+// stores using the provided clock.
+func arrangePropagationServiceTestAt(t *testing.T, now func() time.Time) *propagationFixture {
+	t.Helper()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -572,7 +795,7 @@ func arrangePropagationServiceTest(t *testing.T) *propagationFixture {
 	}
 
 	fixture.service = service.NewPropagationService(
-		fixture.machines, fixture.groups, fixture.policies, fixture.rules, fixture.propagations, nil, time.Now)
+		fixture.machines, fixture.groups, fixture.policies, fixture.rules, fixture.propagations, nil, now)
 
 	return fixture
 }
@@ -725,5 +948,66 @@ func assertNoSend(t *testing.T, channel chan propagation.Message) {
 	case message := <-channel:
 		t.Fatalf("unexpected message %+v", message)
 	default:
+	}
+}
+
+// stepClock is a manually advanced clock safe for concurrent use.
+type stepClock struct {
+	mu      sync.Mutex
+	current time.Time
+}
+
+// now returns the current instant of the clock.
+func (clock *stepClock) now() time.Time {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+
+	return clock.current
+}
+
+// advance moves the clock forward by the given duration.
+func (clock *stepClock) advance(d time.Duration) {
+	clock.mu.Lock()
+	defer clock.mu.Unlock()
+
+	clock.current = clock.current.Add(d)
+}
+
+// arrangeMetricsPropagationTest builds a propagation fixture on a manual clock
+// with a recording metrics mock attached.
+func arrangeMetricsPropagationTest(t *testing.T) (*propagationFixture, *MockPropagationMetrics, *stepClock) {
+	t.Helper()
+
+	clock := &stepClock{current: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	fixture := arrangePropagationServiceTestAt(t, clock.now)
+	metrics := &MockPropagationMetrics{}
+	fixture.service.SetMetrics(metrics)
+
+	return fixture, metrics, clock
+}
+
+// waitForRowStatus blocks until the row of the machine and sequence reaches
+// the status, failing the test on timeout.
+func (fixture *propagationFixture) waitForRowStatus(machineID, sequence int64, status domain.PropagationStatus) {
+	fixture.t.Helper()
+
+	waitForCondition(fixture.t, func() bool {
+		row, exists := fixture.propagations.RowAt(machineID, sequence)
+		return exists && row.Status == status
+	}, propagationWaitTimeout)
+}
+
+// assertMetricCalls fails the test when the recorded calls differ from the
+// expected ones.
+func assertMetricCalls(t *testing.T, got, want []MetricCall) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("metric calls = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("metric call %d = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }

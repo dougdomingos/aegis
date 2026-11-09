@@ -53,6 +53,7 @@ type PropagationService struct {
 	policies   domain.PolicyStore
 	rules      domain.RuleStore
 	store      domain.PropagationStore
+	metrics    PropagationMetrics
 	logger     *slog.Logger
 	now        func() time.Time
 	epoch      string
@@ -92,6 +93,12 @@ func NewPropagationService(
 		senders:  make(map[int64]registeredSender),
 		wake:     make(chan struct{}, 1),
 	}
+}
+
+// SetMetrics attaches the recorder of propagation outcomes. A nil value, the
+// default, disables recording.
+func (service *PropagationService) SetMetrics(metrics PropagationMetrics) {
+	service.metrics = metrics
 }
 
 // Start loads the database epoch and launches the propagation worker. It
@@ -252,10 +259,81 @@ func (service *PropagationService) Acknowledge(ctx context.Context, machineID in
 		return
 	}
 
-	if err := service.store.Acknowledge(ctx, machineID, ack.Sequence, status, ack.Reason, service.now()); err != nil {
+	at := service.now()
+	sentAt := service.recordableSentAt(ctx, machineID, ack.Sequence)
+
+	if err := service.store.Acknowledge(ctx, machineID, ack.Sequence, status, ack.Reason, at); err != nil {
 		service.logger.Error("failed to record propagation acknowledgement",
 			"machine_id", machineID, "sequence", ack.Sequence, "error", err)
+		return
 	}
+
+	if sentAt == nil {
+		return
+	}
+
+	label := "nacked"
+	if status == domain.PropagationAcked {
+		label = "acked"
+	}
+
+	service.metrics.RecordPropagation(service.groupNameOf(ctx, machineID), label, at.Sub(*sentAt))
+}
+
+// recordableSentAt returns the send time of the row an acknowledgement is about
+// to settle, or nil when it must not be reported to the metrics recorder. Only
+// the latest row of the machine, of kind PACKAGE and still SENT, qualifies: late
+// acknowledgements of superseded messages, revokes, and duplicate
+// acknowledgements are skipped. The row is read before the write so a duplicate
+// is detected by its status and a newer row created in between cannot hide it.
+func (service *PropagationService) recordableSentAt(ctx context.Context, machineID, sequence int64) *time.Time {
+	if service.metrics == nil {
+		return nil
+	}
+
+	latest, err := service.store.LatestByMachine(ctx, machineID)
+	if err != nil || latest == nil {
+		return nil
+	}
+
+	if latest.Sequence != sequence || latest.Kind != domain.PropagationPackage || latest.Status != domain.PropagationSent {
+		return nil
+	}
+
+	return latest.SentAt
+}
+
+// groupNameOf resolves the name of the group the machine belongs to, or
+// "unassigned" when the machine has no group. A failed lookup also reports
+// "unassigned" but is logged, so it can be told apart from a real absence. The
+// lookups ignore cancellation of the caller: an outcome observed while the
+// service shuts down must still be attributed to its group.
+func (service *PropagationService) groupNameOf(ctx context.Context, machineID int64) string {
+	const unassigned = "unassigned"
+
+	ctx = context.WithoutCancel(ctx)
+
+	machine, err := service.machines.GetByID(ctx, machineID)
+	if err != nil {
+		service.logger.Warn("failed to resolve machine group for metrics", "machine_id", machineID, "error", err)
+		return unassigned
+	}
+
+	if machine == nil || machine.GroupID == nil {
+		return unassigned
+	}
+
+	group, err := service.groups.GetByID(ctx, *machine.GroupID)
+	if err != nil {
+		service.logger.Warn("failed to resolve machine group for metrics", "machine_id", machineID, "error", err)
+		return unassigned
+	}
+
+	if group == nil {
+		return unassigned
+	}
+
+	return group.Name
 }
 
 // enqueue replaces the pending intent of the machine, latest wins, and signals
@@ -366,6 +444,10 @@ func (service *PropagationService) dispatch(ctx context.Context, machineID int64
 		if markErr := service.store.MarkFailed(ctx, machineID, created.Sequence, err.Error()); markErr != nil {
 			service.logger.Error("failed to mark propagation as failed",
 				"machine_id", machineID, "sequence", created.Sequence, "error", markErr)
+		}
+
+		if service.metrics != nil && built.message.Kind == propagation.KindPackage {
+			service.metrics.RecordPropagation(service.groupNameOf(ctx, machineID), "failed", 0)
 		}
 	}
 }

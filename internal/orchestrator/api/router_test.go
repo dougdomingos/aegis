@@ -188,6 +188,16 @@ func TestNewRouter_WithHealthRequest_ReturnsOkBody(t *testing.T) {
 	}
 }
 
+func TestNewRouter_WithMetricsRequest_ReturnsStatus200(t *testing.T) {
+	router := arrangeRouterTest(t)
+
+	rec := serveJSON(router, http.MethodGet, "/metrics", nil)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status code %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
 // initiateChallenge starts an authentication challenge for the provided IP and
 // returns the issued nonce.
 func initiateChallenge(t *testing.T, router http.Handler, ip string) string {

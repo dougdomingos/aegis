@@ -8,6 +8,7 @@ TEST_PACKAGES = ./internal/orchestrator/store \
 	./internal/orchestrator/api/grpcserver \
 	./internal/sentinel/propagation \
 	./internal/orchestrator/service \
+	./internal/orchestrator/metrics \
 	./internal/orchestrator/config \
 	./internal/common/auth \
 	./internal/orchestrator/api \

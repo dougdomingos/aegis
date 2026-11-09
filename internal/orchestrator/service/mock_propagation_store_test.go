@@ -102,14 +102,14 @@ func (mock *MockPropagationStore) MarkFailed(ctx context.Context, machineID, seq
 	return nil
 }
 
-// Acknowledge applies the terminal status to the matching row; a missing row
-// is silently ignored.
+// Acknowledge applies the terminal status to the matching row while it is
+// SENT; a missing or already settled row is silently ignored.
 func (mock *MockPropagationStore) Acknowledge(ctx context.Context, machineID, sequence int64, status domain.PropagationStatus, reason string, at time.Time) error {
 	mock.mu.Lock()
 	defer mock.mu.Unlock()
 
 	index, exists := mock.rowIndexLocked(machineID, sequence)
-	if !exists {
+	if !exists || mock.Rows[machineID][index].Status != domain.PropagationSent {
 		return nil
 	}
 
@@ -168,6 +168,15 @@ func (mock *MockPropagationStore) Epoch(ctx context.Context) (string, error) {
 	}
 
 	return mock.EpochValue, nil
+}
+
+// SeedRows replaces the rows of the machine, taking the store lock so seeding
+// is safe even while the propagation worker is running.
+func (mock *MockPropagationStore) SeedRows(machineID int64, rows ...domain.Propagation) {
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+
+	mock.Rows[machineID] = rows
 }
 
 // RowAt returns a copy of the row of the given machine and sequence.
