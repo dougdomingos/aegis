@@ -23,6 +23,12 @@ func (handler *HealthHandler) RegisterRoutes(r chi.Router) {
 }
 
 // Check replies 200 with a constant body to signal that the process is alive.
+//
+//	@Summary Liveness probe
+//	@Tags Health
+//	@ID getHealth
+//	@Success 200 {object} map[string]string
+//	@Router /health [get]
 func (handler *HealthHandler) Check(w http.ResponseWriter, r *http.Request) {
 	utils.EncodeToJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -55,6 +55,11 @@ func envOrDefault(name, fallback string) string {
 	return value
 }
 
+// main starts the Orchestrator admin API and propagation servers.
+//
+//	@title Aegis - Orchestrator Admin API
+//	@version v0.1.0
+//	@servers.url http://localhost:8080
 func main() {
 	serverAddress := envOrDefault(envServerAddress, defaultServerAddress)
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))

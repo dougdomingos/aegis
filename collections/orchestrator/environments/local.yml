@@ -1,5 +1,0 @@
-variables:
-  - name: baseUrl
-    value: http://localhost:8080
-  - name: policyID
-    value: "1"

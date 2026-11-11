@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -25,6 +26,10 @@ type MachineService struct {
 	// propagations provides the latest propagation state of each machine for
 	// the status views.
 	propagations domain.PropagationStore
+
+	// notifier propagates the group changes applied by registry imports to the
+	// distribution pipeline. It may be nil, disabling notifications.
+	notifier PropagationNotifier
 
 	// labKey is the shared HMAC key used to verify machine authentication
 	// challenges.
@@ -48,11 +53,13 @@ type MachineService struct {
 }
 
 // NewMachineService creates a new service instance with the provided store
-// providers and authentication secrets.
-func NewMachineService(machineStore domain.MachineStore, propagationStore domain.PropagationStore, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
+// providers, propagation notifier and authentication secrets. The notifier may
+// be nil.
+func NewMachineService(machineStore domain.MachineStore, propagationStore domain.PropagationStore, notifier PropagationNotifier, labKey []byte, sessionSecret string, sessionTTL time.Duration, stalenessGrace time.Duration, now func() time.Time) *MachineService {
 	return &MachineService{
 		store:          machineStore,
 		propagations:   propagationStore,
+		notifier:       notifier,
 		labKey:         labKey,
 		sessionSecret:  sessionSecret,
 		sessionTTL:     sessionTTL,
@@ -62,11 +69,40 @@ func NewMachineService(machineStore domain.MachineStore, propagationStore domain
 	}
 }
 
-// SyncMachines reconciles the stored machines with the provided accepted
-// sources, upserting each configured machine and pruning any whose IP is no
-// longer configured.
-func (service *MachineService) SyncMachines(ctx context.Context, machines []domain.Machine) error {
-	return service.store.Sync(ctx, machines)
+// ImportMachines registers the machines listed in the provided "ip,name,lab"
+// CSV document, creating a group for every unknown lab and linking each machine
+// with a non-empty lab to it. The whole document is validated before any
+// change is persisted, and machines absent from it are kept.
+func (service *MachineService) ImportMachines(ctx context.Context, document io.Reader) (*schemas.MachineImportOutputSchema, error) {
+	entries, err := parseMachineImport(document)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := service.store.Import(ctx, entries)
+	if err != nil {
+		return nil, err
+	}
+
+	if service.notifier != nil {
+		for _, machineID := range result.RelinkedIDs {
+			service.notifier.NotifyMachine(ctx, machineID)
+		}
+	}
+
+	return &schemas.MachineImportOutputSchema{
+		MachinesCreated: result.MachinesCreated,
+		MachinesUpdated: result.MachinesUpdated,
+		GroupsCreated:   result.GroupsCreated,
+		MachinesLinked:  len(result.RelinkedIDs),
+	}, nil
+}
+
+// RemoveMachine removes the machine whose ID matches the argument, so it can no
+// longer authenticate. It fails with ErrMachineNotFound when no machine has the
+// provided ID.
+func (service *MachineService) RemoveMachine(ctx context.Context, machineID int64) error {
+	return service.store.RemoveByID(ctx, machineID)
 }
 
 // ListMachines returns all registered machines within the database.

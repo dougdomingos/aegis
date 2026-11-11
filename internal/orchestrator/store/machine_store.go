@@ -22,9 +22,14 @@ const (
 	queryListMachinesByGroup = `SELECT m.id, m.name, m.ip, m.mac, m.status, m.last_seen_at, m.created_at, m.group_id, g.name
 		FROM machines m LEFT JOIN groups g ON g.id = m.group_id WHERE m.group_id = ?`
 	queryDeleteMachineByIP      = "DELETE FROM machines WHERE ip = ?"
+	queryDeleteMachineByID      = "DELETE FROM machines WHERE id = ?"
 	queryLinkMachineToGroup     = "UPDATE machines SET group_id = ? WHERE id = ?"
 	queryUnlinkMachineFromGroup = "UPDATE machines SET group_id = NULL WHERE id = ?"
 	queryTouchMachine           = "UPDATE machines SET mac = CASE WHEN ? = '' THEN mac ELSE ? END, status = ?, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?"
+	queryCountMachinesByIP      = "SELECT COUNT(*) FROM machines WHERE ip = ?"
+	queryGetMachineLinkByIP     = "SELECT id, group_id FROM machines WHERE ip = ?"
+	queryInsertGroupIfAbsent    = "INSERT OR IGNORE INTO groups (name) VALUES (?)"
+	queryGetGroupIDByName       = "SELECT id FROM groups WHERE name = ?"
 )
 
 // MachineStore manages all database-related operations over machines.
@@ -112,36 +117,49 @@ func (store *MachineStore) RemoveByIP(ctx context.Context, ip string) error {
 	return nil
 }
 
-// Sync reconciles the stored machines with the provided accepted sources,
-// upserting each configured machine and pruning any whose IP is no longer
-// configured, atomically.
-func (store *MachineStore) Sync(ctx context.Context, machines []domain.Machine) error {
-	configured := make(map[string]bool, len(machines))
+func (store *MachineStore) RemoveByID(ctx context.Context, id int64) error {
+	result, err := store.executor.Exec(ctx, queryDeleteMachineByID, id)
+	if err != nil {
+		return fmt.Errorf("failed to remove machine %d: %w", id, err)
+	}
 
-	return store.executor.WithTx(ctx, func(tx *sql.Tx) error {
-		for _, machine := range machines {
-			if _, err := tx.ExecContext(ctx, queryUpsertMachine, machine.Name, machine.IP); err != nil {
-				return fmt.Errorf("failed to upsert machine %q: %w", machine.IP, err)
-			}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
 
-			configured[machine.IP] = true
-		}
+	if rowsAffected == 0 {
+		return fmt.Errorf("%w: id %d", errors.ErrMachineNotFound, id)
+	}
 
-		existent, err := listMachines(ctx, tx)
+	return nil
+}
+
+// Import atomically registers or renames each provided machine, creates a
+// group for every unknown lab, and links each machine with a non-empty lab to
+// its group. Machines absent from the entries are kept.
+func (store *MachineStore) Import(ctx context.Context, entries []domain.MachineImport) (*domain.MachineImportResult, error) {
+	result := &domain.MachineImportResult{}
+
+	err := store.executor.WithTx(ctx, func(tx *sql.Tx) error {
+		groupIDs, err := ensureImportGroups(ctx, tx, entries, result)
 		if err != nil {
-			return fmt.Errorf("failed to list machines for pruning: %w", err)
+			return err
 		}
 
-		for _, machine := range existent {
-			if !configured[machine.IP] {
-				if _, err := tx.ExecContext(ctx, queryDeleteMachineByIP, machine.IP); err != nil {
-					return fmt.Errorf("failed to prune machine %q: %w", machine.IP, err)
-				}
+		for _, entry := range entries {
+			if err := importMachine(ctx, tx, entry, groupIDs, result); err != nil {
+				return err
 			}
 		}
 
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // Touch updates the connection state and last-seen timestamp of the machine
@@ -164,31 +182,87 @@ func (store *MachineStore) Touch(ctx context.Context, id int64, mac string, stat
 	return store.executor.QueryOne(ctx, queryGetMachineByID, id)
 }
 
-// listMachines retrieves all registered machines within the database using the
-// provided transaction.
-func listMachines(ctx context.Context, tx *sql.Tx) ([]domain.Machine, error) {
-	rows, err := tx.QueryContext(ctx, queryGetAllMachines)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute query: %w", err)
-	}
-	defer rows.Close()
+// ensureImportGroups resolves the ID of every unique non-empty lab of the
+// entries, creating the groups that do not exist yet, using the provided
+// transaction.
+func ensureImportGroups(ctx context.Context, tx *sql.Tx, entries []domain.MachineImport, result *domain.MachineImportResult) (map[string]int64, error) {
+	groupIDs := make(map[string]int64)
 
-	var machines []domain.Machine
-
-	for rows.Next() {
-		machine, err := mapRowToMachine(rows.Scan)
-		if err != nil {
-			return nil, fmt.Errorf("failed to map row: %w", err)
+	for _, entry := range entries {
+		if entry.Lab == "" {
+			continue
 		}
 
-		machines = append(machines, machine)
+		if _, resolved := groupIDs[entry.Lab]; resolved {
+			continue
+		}
+
+		inserted, err := tx.ExecContext(ctx, queryInsertGroupIfAbsent, entry.Lab)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create group %q: %w", entry.Lab, err)
+		}
+
+		rowsAffected, err := inserted.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("failed to check rows affected: %w", err)
+		}
+
+		result.GroupsCreated += int(rowsAffected)
+
+		var groupID int64
+		if err := tx.QueryRowContext(ctx, queryGetGroupIDByName, entry.Lab).Scan(&groupID); err != nil {
+			return nil, fmt.Errorf("failed to resolve group %q: %w", entry.Lab, err)
+		}
+
+		groupIDs[entry.Lab] = groupID
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	return groupIDs, nil
+}
+
+// importMachine registers or renames the machine of the entry and links it to
+// the group of its lab when the lab is not empty, using the provided
+// transaction.
+func importMachine(ctx context.Context, tx *sql.Tx, entry domain.MachineImport, groupIDs map[string]int64, result *domain.MachineImportResult) error {
+	machine := entry.Machine
+
+	var existent int
+	if err := tx.QueryRowContext(ctx, queryCountMachinesByIP, machine.IP).Scan(&existent); err != nil {
+		return fmt.Errorf("failed to check machine %q: %w", machine.IP, err)
 	}
 
-	return machines, nil
+	if _, err := tx.ExecContext(ctx, queryUpsertMachine, machine.Name, machine.IP); err != nil {
+		return fmt.Errorf("failed to upsert machine %q: %w", machine.IP, err)
+	}
+
+	if existent == 0 {
+		result.MachinesCreated++
+	} else {
+		result.MachinesUpdated++
+	}
+
+	if entry.Lab == "" {
+		return nil
+	}
+
+	var machineID int64
+	var currentGroupID sql.NullInt64
+	if err := tx.QueryRowContext(ctx, queryGetMachineLinkByIP, machine.IP).Scan(&machineID, &currentGroupID); err != nil {
+		return fmt.Errorf("failed to resolve machine %q: %w", machine.IP, err)
+	}
+
+	groupID := groupIDs[entry.Lab]
+	if currentGroupID.Valid && currentGroupID.Int64 == groupID {
+		return nil
+	}
+
+	if _, err := tx.ExecContext(ctx, queryLinkMachineToGroup, groupID, machineID); err != nil {
+		return fmt.Errorf("failed to link machine %q to group %q: %w", machine.IP, entry.Lab, err)
+	}
+
+	result.RelinkedIDs = append(result.RelinkedIDs, machineID)
+
+	return nil
 }
 
 // mapRowToMachine maps a scan function to a domain.Machine struct.

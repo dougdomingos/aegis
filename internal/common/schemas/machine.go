@@ -58,3 +58,11 @@ type AuthenticateOutputSchema struct {
 	ExpiresAt    time.Time
 	Machine      MachineOutputSchema
 }
+
+// MachineImportOutputSchema declares the summary of a machine registry import.
+type MachineImportOutputSchema struct {
+	MachinesCreated int `json:"machines_created"`
+	MachinesUpdated int `json:"machines_updated"`
+	GroupsCreated   int `json:"groups_created"`
+	MachinesLinked  int `json:"machines_linked"`
+}

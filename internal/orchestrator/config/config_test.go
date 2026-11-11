@@ -3,7 +3,6 @@ package config_test
 import (
 	"bytes"
 	"encoding/hex"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,13 +18,9 @@ const validLabKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789a
 // labKeyFile is the contents of a valid lab key file.
 const labKeyFile = validLabKey + "\n"
 
-// machinesFile is the contents of a valid machines CSV file.
-const machinesFile = "ip,name\n10.0.1.11,lcc1-011\n10.0.1.12,lcc1-012\n"
-
 func TestConfig_Load_WithValidEnv_ReturnsParsedConfig(t *testing.T) {
 	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
 
 	cfg, err := config.Load()
 
@@ -44,18 +39,6 @@ func TestConfig_Load_WithValidEnv_ReturnsParsedConfig(t *testing.T) {
 
 	if cfg.SessionTTL != 24*time.Hour {
 		t.Errorf("expected default TTL %v, got %v", 24*time.Hour, cfg.SessionTTL)
-	}
-
-	if len(cfg.Machines) != 2 {
-		t.Fatalf("expected 2 machines, got %d", len(cfg.Machines))
-	}
-
-	if cfg.Machines[0].IP != "10.0.1.11" || cfg.Machines[0].Name != "lcc1-011" {
-		t.Errorf("unexpected first machine: %+v", cfg.Machines[0])
-	}
-
-	if cfg.Machines[1].IP != "10.0.1.12" || cfg.Machines[1].Name != "lcc1-012" {
-		t.Errorf("unexpected second machine: %+v", cfg.Machines[1])
 	}
 }
 
@@ -78,7 +61,6 @@ func TestConfig_Load_WithCustomTTL_ReturnsConfiguredTTL(t *testing.T) {
 func TestConfig_Load_WithUnsetGrace_DefaultsToNinetySeconds(t *testing.T) {
 	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -93,7 +75,6 @@ func TestConfig_Load_WithUnsetGrace_DefaultsToNinetySeconds(t *testing.T) {
 func TestConfig_Load_WithCustomGrace_ReturnsConfiguredGrace(t *testing.T) {
 	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
 	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, machinesFile))
 	t.Setenv("AEGIS_STALENESS_GRACE", "10s")
 
 	cfg, err := config.Load()
@@ -192,74 +173,6 @@ func TestConfig_Load_WithInvalidTTL_ReturnsError(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected an error for invalid TTL, got nil")
-	}
-}
-
-func TestConfig_Load_WithMissingMachinesFile_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
-	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", filepath.Join(t.TempDir(), "does-not-exist.csv"))
-
-	_, err := config.Load()
-
-	if err == nil {
-		t.Error("expected an error for a missing machines file, got nil")
-	}
-}
-
-func TestConfig_Load_WithWrongHeaderMachinesFile_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
-	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "name,ip\nlcc1-011,10.0.1.11\n"))
-
-	_, err := config.Load()
-
-	if err == nil {
-		t.Error("expected an error for a machines file with the wrong header, got nil")
-	}
-}
-
-func TestConfig_Load_WithInvalidMachineIP_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
-	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "ip,name\nnot-an-ip,lcc1-011\n"))
-
-	_, err := config.Load()
-
-	if err == nil {
-		t.Error("expected an error for invalid machine IP, got nil")
-	}
-}
-
-func TestConfig_Load_WithEmptyMachineName_ReturnsError(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
-	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-	t.Setenv("AEGIS_MACHINES", writeTempFile(t, "ip,name\n10.0.1.11,\n"))
-
-	_, err := config.Load()
-
-	if err == nil {
-		t.Error("expected an error for an empty machine name, got nil")
-	}
-}
-
-func TestConfig_Load_WithoutMachinesFile_LogsWarning(t *testing.T) {
-	t.Setenv("AEGIS_LAB_KEY", writeTempFile(t, labKeyFile))
-	t.Setenv("AEGIS_SESSION_SECRET", "sign-secret")
-
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	log.SetFlags(0)
-	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-
-	_, err := config.Load()
-
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	if !strings.Contains(buf.String(), "no machines configured") {
-		t.Errorf("expected warning about no machines, got %q", buf.String())
 	}
 }
 

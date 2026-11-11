@@ -19,6 +19,9 @@ type MockMachineStore struct {
 	machines map[string]*domain.Machine
 	StoreErr error
 	nextID   int64
+
+	// ImportGroupIDs maps lab names to the IDs of the groups resolved by Import.
+	ImportGroupIDs map[string]int64
 }
 
 // NewMockMachineStore initializes a new MockMachineStore instance.
@@ -88,31 +91,70 @@ func (mock *MockMachineStore) RemoveByIP(ctx context.Context, ip string) error {
 	return nil
 }
 
-// Sync reconciles the stored machines with the provided accepted sources,
-// upserting each configured machine and pruning any whose IP is no longer
-// configured.
-func (mock *MockMachineStore) Sync(ctx context.Context, machines []domain.Machine) error {
+// RemoveByID deletes a machine by its ID or returns StoreErr if set. An unknown
+// ID returns ErrMachineNotFound, mirroring the real store.
+func (mock *MockMachineStore) RemoveByID(ctx context.Context, id int64) error {
 	if mock.StoreErr != nil {
 		return mock.StoreErr
 	}
 
-	configured := make(map[string]bool, len(machines))
-
-	for _, machine := range machines {
-		if _, err := mock.Upsert(ctx, machine); err != nil {
-			return err
-		}
-
-		configured[machine.IP] = true
-	}
-
-	for ip := range mock.machines {
-		if !configured[ip] {
+	for ip, machine := range mock.machines {
+		if machine.ID == id {
 			delete(mock.machines, ip)
+			return nil
 		}
 	}
 
-	return nil
+	return fmt.Errorf("%w: id %d", machineErrors.ErrMachineNotFound, id)
+}
+
+// Import registers or renames each entry's machine and links it to the group
+// resolved by ImportGroupIDs, or returns StoreErr if set. Labs without a
+// configured group ID are counted as created groups and assigned new IDs.
+func (mock *MockMachineStore) Import(ctx context.Context, entries []domain.MachineImport) (*domain.MachineImportResult, error) {
+	if mock.StoreErr != nil {
+		return nil, mock.StoreErr
+	}
+
+	if mock.ImportGroupIDs == nil {
+		mock.ImportGroupIDs = make(map[string]int64)
+	}
+
+	result := &domain.MachineImportResult{}
+
+	for _, entry := range entries {
+		if _, exists := mock.machines[entry.Machine.IP]; exists {
+			result.MachinesUpdated++
+		} else {
+			result.MachinesCreated++
+		}
+
+		machine, err := mock.Upsert(ctx, entry.Machine)
+		if err != nil {
+			return nil, err
+		}
+
+		if entry.Lab == "" {
+			continue
+		}
+
+		groupID, exists := mock.ImportGroupIDs[entry.Lab]
+		if !exists {
+			groupID = int64(len(mock.ImportGroupIDs) + 1000)
+			mock.ImportGroupIDs[entry.Lab] = groupID
+			result.GroupsCreated++
+		}
+
+		if machine.GroupID != nil && *machine.GroupID == groupID {
+			continue
+		}
+
+		machine.GroupID = &groupID
+		machine.GroupName = entry.Lab
+		result.RelinkedIDs = append(result.RelinkedIDs, machine.ID)
+	}
+
+	return result, nil
 }
 
 // Touch updates the connection state and last-seen timestamp of a machine.

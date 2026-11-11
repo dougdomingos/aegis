@@ -46,6 +46,15 @@ func (handler *RuleHandler) RegisterRoutes(r chi.Router) {
 }
 
 // Create registers a new rule within the policy referenced in the URL.
+//
+//	@Summary Create rule
+//	@Tags Rules
+//	@ID createRule
+//	@Param policyID path int true "Policy ID"
+//	@Param body body schemas.CreateRuleSchema true "Rule"
+//	@Success 201 {object} schemas.RuleOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID}/rules [post]
 func (handler *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 	policyID, ok := parsePolicyID(w, r, "policyID")
 	if !ok {
@@ -80,6 +89,16 @@ func (handler *RuleHandler) Create(w http.ResponseWriter, r *http.Request) {
 // List returns all the rules that belong to the policy referenced in the URL
 // and match the provided query filters. If no filter is provided, it returns
 // every rule of that policy.
+//
+//	@Summary List rules of a policy
+//	@Tags Rules
+//	@ID listRules
+//	@Param policyID path int true "Policy ID"
+//	@Param rule_type query string false "Rule type" Enums(DOMAIN, IP)
+//	@Param value query string false "Rule value"
+//	@Success 200 {array} schemas.RuleOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID}/rules [get]
 func (handler *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 	policyID, ok := parsePolicyID(w, r, "policyID")
 	if !ok {
@@ -114,6 +133,15 @@ func (handler *RuleHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetByID retrieves a rule by its ID within the policy referenced in the URL.
+//
+//	@Summary Get rule by ID
+//	@Tags Rules
+//	@ID getRuleById
+//	@Param policyID path int true "Policy ID"
+//	@Param ruleID path int true "Rule ID"
+//	@Success 200 {object} schemas.RuleOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID}/rules/{ruleID} [get]
 func (handler *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {
@@ -141,6 +169,16 @@ func (handler *RuleHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 // Update applies the provided changes to an existent rule within the policy
 // referenced in the URL.
+//
+//	@Summary Update rule
+//	@Tags Rules
+//	@ID updateRule
+//	@Param policyID path int true "Policy ID"
+//	@Param ruleID path int true "Rule ID"
+//	@Param body body schemas.UpdateRuleSchema true "Rule"
+//	@Success 200 {object} schemas.RuleOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID}/rules/{ruleID} [patch]
 func (handler *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {
@@ -173,6 +211,15 @@ func (handler *RuleHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete removes a rule by its ID within the policy referenced in the URL.
+//
+//	@Summary Delete rule
+//	@Tags Rules
+//	@ID deleteRule
+//	@Param policyID path int true "Policy ID"
+//	@Param ruleID path int true "Rule ID"
+//	@Success 204
+//	@Failure 400,404,409 {object} utils.ErrorResponse
+//	@Router /policies/{policyID}/rules/{ruleID} [delete]
 func (handler *RuleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	policyID, ruleID, ok := parseScopedRuleID(w, r)
 	if !ok {

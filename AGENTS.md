@@ -85,6 +85,10 @@ make test-report
 # containers (requires Docker)
 make e2e
 
+# Regenerate collections/orchestrator/openapi.yml from the swag annotations
+# in the API handlers (re-run after any route change)
+make openapi
+
 # List every available target
 make help
 ```

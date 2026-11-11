@@ -23,4 +23,8 @@ var (
 	// ErrMachineNotInGroup is returned when unlinking a machine from a group it is
 	// not currently associated with.
 	ErrMachineNotInGroup = errors.New("machine is not linked to the requested group")
+
+	// ErrInvalidMachinesCSV is returned when a machine registry import is not a
+	// well-formed "ip,name,lab" CSV document.
+	ErrInvalidMachinesCSV = errors.New("invalid machines csv")
 )

@@ -152,44 +152,214 @@ func TestMachineStore_RemoveByIP_WithExistingIP_RemovesMachine(t *testing.T) {
 }
 
 // ============================================================================
-// Sync
+// RemoveByID
 // ============================================================================
 
-func TestMachineStore_Sync_WithSourcesAndPruning_Reconciles(t *testing.T) {
-	ctx, store := arrangeStoreTest(t, store.NewMachineStore)
+func TestMachineStore_RemoveByID_WithExistingID_RemovesMachine(t *testing.T) {
+	ctx, machineStore, _ := arrangeMachineGroupStoreTest(t)
+	machine := seedImportMachine(t, ctx, machineStore, "10.0.1.11", "lcc1-011")
 
-	if _, err := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}); err != nil {
-		t.Fatalf("failed to seed machine: %v", err)
+	err := machineStore.RemoveByID(ctx, machine.ID)
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	err := store.Sync(ctx, []domain.Machine{
-		{IP: "10.0.1.12", Name: "lcc1-012"},
+	removed, err := machineStore.GetByID(ctx, machine.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if removed != nil {
+		t.Errorf("expected machine to be removed, got %+v", removed)
+	}
+}
+
+func TestMachineStore_RemoveByID_WithUnknownID_ReturnsErrMachineNotFound(t *testing.T) {
+	ctx, machineStore, _ := arrangeMachineGroupStoreTest(t)
+
+	err := machineStore.RemoveByID(ctx, 999)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected ErrMachineNotFound, got: %v", err)
+	}
+}
+
+// ============================================================================
+// Import
+// ============================================================================
+
+func TestMachineStore_Import_WithUnknownLab_CreatesGroupAndLinksMachines(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}, Lab: "lcc1"},
+		{Machine: domain.Machine{IP: "10.0.1.12", Name: "lcc1-012"}, Lab: "lcc1"},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.MachinesCreated != 2 || result.MachinesUpdated != 0 || result.GroupsCreated != 1 || len(result.RelinkedIDs) != 2 {
+		t.Errorf("expected 2 created, 0 updated, 1 group, 2 relinked, got %+v", result)
+	}
+
+	group, err := groupStore.GetByName(ctx, "lcc1")
+	if err != nil || group == nil {
+		t.Fatalf("expected group %q to exist, got %v (err: %v)", "lcc1", group, err)
+	}
+
+	members, err := machineStore.ListByGroup(ctx, group.ID)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(members) != 2 {
+		t.Errorf("expected 2 machines linked to %q, got %d", "lcc1", len(members))
+	}
+}
+
+func TestMachineStore_Import_WithExistingLab_ReusesGroup(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	existing := seedGroup(t, ctx, groupStore, "lcc1")
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}, Lab: "lcc1"},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.GroupsCreated != 0 {
+		t.Errorf("expected no group to be created, got %d", result.GroupsCreated)
+	}
+
+	machine, err := machineStore.GetByIP(ctx, "10.0.1.11")
+	if err != nil || machine == nil {
+		t.Fatalf("expected machine to exist, got %v (err: %v)", machine, err)
+	}
+	if machine.GroupID == nil || *machine.GroupID != existing.ID {
+		t.Errorf("expected machine linked to group %d, got %v", existing.ID, machine.GroupID)
+	}
+}
+
+func TestMachineStore_Import_WithExistingIP_UpdatesNameAndKeepsState(t *testing.T) {
+	ctx, machineStore, _ := arrangeMachineGroupStoreTest(t)
+	seeded := seedImportMachine(t, ctx, machineStore, "10.0.1.11", "old-name")
+	if _, err := machineStore.Touch(ctx, seeded.ID, "aa:bb:cc:dd:ee:ff", domain.ConnectedStatus); err != nil {
+		t.Fatalf("failed to touch machine: %v", err)
+	}
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.MachinesCreated != 0 || result.MachinesUpdated != 1 {
+		t.Errorf("expected 0 created and 1 updated, got %+v", result)
+	}
+
+	machine, err := machineStore.GetByIP(ctx, "10.0.1.11")
+	if err != nil || machine == nil {
+		t.Fatalf("expected machine to exist, got %v (err: %v)", machine, err)
+	}
+	if machine.ID != seeded.ID || machine.Name != "lcc1-011" || machine.Status != domain.ConnectedStatus {
+		t.Errorf("expected same machine renamed and still connected, got %+v", machine)
+	}
+}
+
+func TestMachineStore_Import_WithEmptyLab_KeepsCurrentLink(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group := seedGroup(t, ctx, groupStore, "lcc1")
+	seeded := seedImportMachine(t, ctx, machineStore, "10.0.1.11", "lcc1-011")
+	if _, err := machineStore.LinkToGroup(ctx, seeded.ID, group.ID); err != nil {
+		t.Fatalf("failed to link machine: %v", err)
+	}
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}, Lab: ""},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(result.RelinkedIDs) != 0 {
+		t.Errorf("expected no relinked machines, got %v", result.RelinkedIDs)
+	}
+
+	machine, _ := machineStore.GetByID(ctx, seeded.ID)
+	if machine.GroupID == nil || *machine.GroupID != group.ID {
+		t.Errorf("expected machine to stay linked to group %d, got %v", group.ID, machine.GroupID)
+	}
+}
+
+func TestMachineStore_Import_WithSameLab_DoesNotReportRelink(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	group := seedGroup(t, ctx, groupStore, "lcc1")
+	seeded := seedImportMachine(t, ctx, machineStore, "10.0.1.11", "lcc1-011")
+	if _, err := machineStore.LinkToGroup(ctx, seeded.ID, group.ID); err != nil {
+		t.Fatalf("failed to link machine: %v", err)
+	}
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}, Lab: "lcc1"},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(result.RelinkedIDs) != 0 {
+		t.Errorf("expected no relinked machines, got %v", result.RelinkedIDs)
+	}
+}
+
+func TestMachineStore_Import_WithDifferentLab_MovesMachine(t *testing.T) {
+	ctx, machineStore, groupStore := arrangeMachineGroupStoreTest(t)
+	previous := seedGroup(t, ctx, groupStore, "lcc1")
+	seeded := seedImportMachine(t, ctx, machineStore, "10.0.1.11", "lcc1-011")
+	if _, err := machineStore.LinkToGroup(ctx, seeded.ID, previous.ID); err != nil {
+		t.Fatalf("failed to link machine: %v", err)
+	}
+
+	result, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"}, Lab: "lcc2"},
+	})
+
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(result.RelinkedIDs) != 1 || result.RelinkedIDs[0] != seeded.ID {
+		t.Errorf("expected machine %d to be relinked, got %v", seeded.ID, result.RelinkedIDs)
+	}
+
+	machine, _ := machineStore.GetByID(ctx, seeded.ID)
+	if machine.GroupName != "lcc2" {
+		t.Errorf("expected machine linked to %q, got %q", "lcc2", machine.GroupName)
+	}
+
+	if kept, _ := groupStore.GetByName(ctx, "lcc1"); kept == nil {
+		t.Errorf("expected emptied group %q to be kept", "lcc1")
+	}
+}
+
+func TestMachineStore_Import_WithAbsentMachine_KeepsMachine(t *testing.T) {
+	ctx, machineStore, _ := arrangeMachineGroupStoreTest(t)
+	seedImportMachine(t, ctx, machineStore, "10.0.1.11", "lcc1-011")
+
+	_, err := machineStore.Import(ctx, []domain.MachineImport{
+		{Machine: domain.Machine{IP: "10.0.1.12", Name: "lcc1-012"}, Lab: "lcc1"},
 	})
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	removed, err := store.GetByIP(ctx, "10.0.1.11")
+	listed, err := machineStore.List(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
-
-	if removed != nil {
-		t.Errorf("expected pruned machine to be nil, got %+v", removed)
-	}
-
-	listed, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
-
-	if len(listed) != 1 {
-		t.Fatalf("expected 1 machine, got %d", len(listed))
-	}
-
-	if listed[0].IP != "10.0.1.12" {
-		t.Errorf("expected IP %q, got %q", "10.0.1.12", listed[0].IP)
+	if len(listed) != 2 {
+		t.Errorf("expected 2 machines, got %d", len(listed))
 	}
 }
 
@@ -369,6 +539,30 @@ func TestGroupStore_Remove_WithLinkedMachines_KeepsMachinesUnlinked(t *testing.T
 // ============================================================================
 // Helpers
 // ============================================================================
+
+// seedGroup creates a group with the provided name.
+func seedGroup(t *testing.T, ctx context.Context, groupStore *store.GroupStore, name string) *domain.Group {
+	t.Helper()
+
+	group, err := groupStore.Create(ctx, name)
+	if err != nil {
+		t.Fatalf("failed to seed group: %v", err)
+	}
+
+	return group
+}
+
+// seedImportMachine upserts a machine with the provided IP and name.
+func seedImportMachine(t *testing.T, ctx context.Context, machineStore *store.MachineStore, ip, name string) *domain.Machine {
+	t.Helper()
+
+	machine, err := machineStore.Upsert(ctx, domain.Machine{IP: ip, Name: name})
+	if err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
+	}
+
+	return machine
+}
 
 // arrangeMachineGroupStoreTest builds both stores over a migrated database.
 func arrangeMachineGroupStoreTest(t *testing.T) (context.Context, *store.MachineStore, *store.GroupStore) {

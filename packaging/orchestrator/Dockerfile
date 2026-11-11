@@ -28,9 +28,10 @@ COPY --from=build /out/aegis-orchestrator /usr/local/bin/aegis-orchestrator
 # HTTP REST API and gRPC propagation server.
 EXPOSE 8080 9090
 
-# Defaults; override at runtime. Secrets and the lab key / machines registry
-# must be mounted, not baked into the image:
-#   AEGIS_LAB_KEY, AEGIS_SESSION_SECRET (required), AEGIS_MACHINES.
+# Defaults; override at runtime. Secrets and the lab key must be mounted, not
+# baked into the image:
+#   AEGIS_LAB_KEY, AEGIS_SESSION_SECRET (required).
+# The machines registry is imported at runtime via POST /machines/import.
 ENV AEGIS_ADDR=:8080 \
     AEGIS_GRPC_ADDR=:9090 \
     AEGIS_DB=/var/lib/aegis/aegis.db

@@ -26,7 +26,7 @@ import (
 const (
 	// networkSubnet is the fixed IPv4 subnet of the fleet network. The
 	// addresses inside it are planned, so the accepted-machines registry can
-	// be rendered before any container starts.
+	// be rendered before any Sentinel starts.
 	networkSubnet = "172.30.0.0/24"
 
 	// orchestratorIP is the planned static address of the Orchestrator.
@@ -57,9 +57,6 @@ const (
 
 	// labKeyPath is the in-container path of the shared lab key file.
 	labKeyPath = "/etc/aegis/lab.key"
-
-	// machinesFilePath is the in-container path of the accepted-machines CSV.
-	machinesFilePath = "/etc/aegis/machines.csv"
 
 	// sentinelConfigPath is the in-container path of the Sentinel JSON config.
 	sentinelConfigPath = "/etc/aegis/sentinel.json"
@@ -125,8 +122,8 @@ func machineName(index int) string {
 }
 
 // fleet is a per-test Aegis network on the fixed subnet plus its Orchestrator.
-// The accepted-machines registry is rendered from the planned IPs before the
-// Orchestrator starts, since SyncMachines runs only once at startup.
+// The accepted-machines registry is rendered from the planned IPs and imported
+// right after the Orchestrator starts, before any Sentinel boots.
 type fleet struct {
 	t            *testing.T
 	network      *testcontainers.DockerNetwork
@@ -162,20 +159,15 @@ type orchestratorOptions struct {
 }
 
 // startOrchestrator boots the real Orchestrator container on the fleet network
-// with the planned static IP, the injected lab key and machines registry, and
-// its API port published to the host, waiting for it to serve /machines.
+// with the planned static IP, the injected lab key and its API port published
+// to the host, waits for it to serve /machines, then imports the machines
+// registry with no labs so each test links its own groups.
 func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) testcontainers.Container {
 	t.Helper()
-
-	registry := "ip,name\n"
-	for i := 0; i < f.machineCount; i++ {
-		registry += fmt.Sprintf("%s,%s\n", sentinelIP(i), machineName(i))
-	}
 
 	env := map[string]string{
 		"AEGIS_LAB_KEY":        labKeyPath,
 		"AEGIS_SESSION_SECRET": sessionSecret,
-		"AEGIS_MACHINES":       machinesFilePath,
 		"AEGIS_DB":             "/home/nonroot/aegis.db",
 		"AEGIS_GRPC_ADDR":      ":9090",
 	}
@@ -189,7 +181,6 @@ func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) tes
 		testcontainers.WithEnv(env),
 		testcontainers.WithFiles(
 			injectedFile(labKeyPath, validLabKeyHex+"\n"),
-			injectedFile(machinesFilePath, registry),
 		),
 		testcontainers.WithExposedPorts(orchestratorPort, orchestratorGRPCPort),
 		testcontainers.WithWaitStrategyAndDeadline(readyTimeout,
@@ -208,8 +199,30 @@ func (f *fleet) startOrchestrator(t *testing.T, opts ...orchestratorOptions) tes
 	})
 
 	f.orchestrator = c
+	f.importRegistry(t)
 
 	return c
+}
+
+// importRegistry posts the accepted-machines registry, rendered from the
+// planned Sentinel IPs with an empty lab column, to POST /machines/import.
+func (f *fleet) importRegistry(t *testing.T) {
+	t.Helper()
+
+	registry := "ip,name,lab\n"
+	for i := 0; i < f.machineCount; i++ {
+		registry += fmt.Sprintf("%s,%s,\n", sentinelIP(i), machineName(i))
+	}
+
+	resp, err := http.Post(f.orchestratorEndpoint(t)+"/machines/import", "text/csv", strings.NewReader(registry))
+	if err != nil {
+		t.Fatalf("failed to import the machines registry: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("import machines status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
 }
 
 // machines lists the current machine registry keyed by IP via GET /machines on

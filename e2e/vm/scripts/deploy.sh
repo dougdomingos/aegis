@@ -46,12 +46,10 @@ vm_ssh "$ORCHESTRATOR_IP" "sudo SESSION_SECRET=$session_secret bash -es" <<'REMO
 mkdir -p /etc/aegis /var/lib/aegis
 install -m 755 aegis-orchestrator /usr/local/bin/
 install -m 600 lab.key /etc/aegis/lab.key
-install -m 644 machines.csv /etc/aegis/machines.csv
 install -m 644 aegis-orchestrator.service /etc/systemd/system/
 (umask 077; cat >/etc/aegis/orchestrator.env <<ENV
 AEGIS_LAB_KEY=/etc/aegis/lab.key
 AEGIS_SESSION_SECRET=$SESSION_SECRET
-AEGIS_MACHINES=/etc/aegis/machines.csv
 AEGIS_DB=/var/lib/aegis/aegis.db
 AEGIS_GRPC_ADDR=:9090
 AEGIS_STALENESS_GRACE=15s
@@ -60,6 +58,14 @@ ENV
 rm -f lab.key
 systemctl daemon-reload
 systemctl enable --now aegis-orchestrator
+# The machines registry is imported through the API once it is serving.
+for _ in $(seq 30); do
+	curl -fsS -o /dev/null http://127.0.0.1:8080/machines && break
+	sleep 1
+done
+curl -fsS -H 'Content-Type: text/csv' --data-binary @machines.csv \
+	http://127.0.0.1:8080/machines/import
+rm -f machines.csv
 touch /etc/cloud/cloud-init.disabled
 REMOTE
 

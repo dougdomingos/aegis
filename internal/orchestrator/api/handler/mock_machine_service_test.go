@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ type mockMachineService struct {
 	authenticateFn         func(ctx context.Context, p schemas.AuthenticateMachineSchema) (*schemas.AuthenticateOutputSchema, error)
 	heartbeatFn            func(ctx context.Context, token string) error
 	getPropagationStatusFn func(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error)
+	importMachinesFn       func(ctx context.Context, document io.Reader) (*schemas.MachineImportOutputSchema, error)
+	removeMachineFn        func(ctx context.Context, machineID int64) error
 }
 
 func (m *mockMachineService) ListMachines(ctx context.Context) ([]schemas.MachineOutputSchema, error) {
@@ -38,6 +41,14 @@ func (m *mockMachineService) Authenticate(ctx context.Context, p schemas.Authent
 
 func (m *mockMachineService) GetPropagationStatus(ctx context.Context, machineID int64) (*schemas.PropagationOutputSchema, error) {
 	return m.getPropagationStatusFn(ctx, machineID)
+}
+
+func (m *mockMachineService) ImportMachines(ctx context.Context, document io.Reader) (*schemas.MachineImportOutputSchema, error) {
+	return m.importMachinesFn(ctx, document)
+}
+
+func (m *mockMachineService) RemoveMachine(ctx context.Context, machineID int64) error {
+	return m.removeMachineFn(ctx, machineID)
 }
 
 // ============================================================================
