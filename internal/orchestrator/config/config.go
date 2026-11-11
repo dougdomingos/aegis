@@ -1,11 +1,9 @@
 // Package config loads server configuration from environment variables,
-// including the shared lab key and the accepted machine sources.
+// including the shared lab key and the session settings.
 package config
 
 import (
-	"encoding/csv"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -31,10 +29,6 @@ const (
 	// token lifetime.
 	envSessionTTL = "AEGIS_SESSION_TTL"
 
-	// envMachines is the environment variable holding the path to the CSV file
-	// listing the accepted machine sources.
-	envMachines = "AEGIS_MACHINES"
-
 	// envStalenessGrace is the environment variable overriding the default
 	// machine staleness grace window.
 	envStalenessGrace = "AEGIS_STALENESS_GRACE"
@@ -51,19 +45,7 @@ const (
 	// as CONNECTED after its last heartbeat, covering three consecutive beats of
 	// the default Sentinel heartbeat interval.
 	defaultStalenessGrace = "90s"
-
-	// machinesHeader is the expected header row of the machines CSV file.
-	machinesHeader = "ip,name"
 )
-
-// Machine declares a single accepted machine source.
-type Machine struct {
-	// IP is the fixed address identifying the machine.
-	IP string
-
-	// Name is the human-friendly label following the lccX-YYY pattern.
-	Name string
-}
 
 // Config holds the machine-related server configuration.
 type Config struct {
@@ -83,9 +65,6 @@ type Config struct {
 
 	// GRPCAddr is the address the gRPC propagation server binds to.
 	GRPCAddr string
-
-	// Machines is the list of accepted machine sources.
-	Machines []Machine
 }
 
 // Load reads the machine-related configuration from environment variables and
@@ -116,22 +95,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	machines, err := parseMachines(os.Getenv(envMachines))
-	if err != nil {
-		return nil, err
-	}
-
-	if len(machines) == 0 {
-		log.Printf("warning: no machines configured; all authentication attempts will fail")
-	}
-
 	return &Config{
 		LabKey:         labKey,
 		SessionSecret:  sessionSecret,
 		SessionTTL:     sessionTTL,
 		StalenessGrace: stalenessGrace,
 		GRPCAddr:       grpcAddr,
-		Machines:       machines,
 	}, nil
 }
 
@@ -220,57 +189,4 @@ func parseGRPCAddr(raw string) (string, error) {
 	}
 
 	return value, nil
-}
-
-// parseMachines reads the accepted machine sources from the CSV file at the
-// provided path. The file must have an "ip,name" header row followed by one
-// machine per line.
-func parseMachines(path string) ([]Machine, error) {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return nil, nil
-	}
-
-	file, err := os.Open(trimmed)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: failed to open machines file: %w", envMachines, err)
-	}
-	defer file.Close()
-
-	records, err := csv.NewReader(file).ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s: failed to parse machines file: %w", envMachines, err)
-	}
-
-	if len(records) == 0 {
-		return nil, fmt.Errorf("invalid %s: machines file is empty", envMachines)
-	}
-
-	header := strings.Join(records[0], ",")
-	if header != machinesHeader {
-		return nil, fmt.Errorf("invalid %s: header must be %q", envMachines, machinesHeader)
-	}
-
-	var machines []Machine
-
-	for _, record := range records[1:] {
-		if len(record) != 2 {
-			return nil, fmt.Errorf("invalid %s: each row must have 2 fields", envMachines)
-		}
-
-		ip := strings.TrimSpace(record[0])
-		name := strings.TrimSpace(record[1])
-
-		if net.ParseIP(ip) == nil {
-			return nil, fmt.Errorf("invalid %s: %q is not a valid IP address", envMachines, ip)
-		}
-
-		if name == "" {
-			return nil, fmt.Errorf("invalid %s: empty name", envMachines)
-		}
-
-		machines = append(machines, Machine{IP: ip, Name: name})
-	}
-
-	return machines, nil
 }

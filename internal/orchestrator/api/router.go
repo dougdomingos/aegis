@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"dougdomingos.com/aegis/internal/orchestrator/api/handler"
 	"dougdomingos.com/aegis/internal/orchestrator/api/middleware"
 	"dougdomingos.com/aegis/internal/orchestrator/config"
-	"dougdomingos.com/aegis/internal/orchestrator/domain"
 	"dougdomingos.com/aegis/internal/orchestrator/metrics"
 	"dougdomingos.com/aegis/internal/orchestrator/service"
 	"dougdomingos.com/aegis/internal/orchestrator/store"
@@ -29,19 +27,6 @@ func registerHandlers(r chi.Router, handlers ...routerHandler) {
 	for _, handler := range handlers {
 		handler.RegisterRoutes(r)
 	}
-}
-
-func seedMachines(s *service.MachineService, cfg *config.Config) error {
-	machineList := make([]domain.Machine, 0, len(cfg.Machines))
-	for _, machine := range cfg.Machines {
-		machineList = append(machineList, domain.Machine{IP: machine.IP, Name: machine.Name})
-	}
-
-	if err := s.SyncMachines(context.Background(), machineList); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // Runtime bundles the HTTP handler with the propagation service that shares
@@ -74,11 +59,7 @@ func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, 
 	propagationService.SetMetrics(propagationMetrics)
 
 	machineService := service.NewMachineService(
-		machineStore, propagationStore, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
-
-	if err := seedMachines(machineService, cfg); err != nil {
-		return nil, err
-	}
+		machineStore, propagationStore, propagationService, cfg.LabKey, cfg.SessionSecret, cfg.SessionTTL, cfg.StalenessGrace, time.Now)
 
 	registerHandlers(router,
 		handler.NewHealthHandler(),
@@ -93,8 +74,8 @@ func NewRuntime(db *sql.DB, cfg *config.Config, logger *slog.Logger) (*Runtime, 
 	return &Runtime{HTTP: router, Propagation: propagationService}, nil
 }
 
-// NewRouter builds the shared HTTP router, synchronizing the configured
-// machine sources into the database before registering their routes.
+// NewRouter builds the shared HTTP router over the provided database and
+// configuration.
 func NewRouter(db *sql.DB, cfg *config.Config) (http.Handler, error) {
 	runtime, err := NewRuntime(db, cfg, nil)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -19,53 +20,161 @@ import (
 const labSecretKey = "0123456789abcdef0123456789abcdef"
 
 // ============================================================================
-// SyncMachines
+// ImportMachines
 // ============================================================================
 
-func TestMachineService_SyncMachines_WithNewSources_InsertsMachines(t *testing.T) {
-	ctx, store, svc, _ := arrangeMachineServiceTest(t)
-	machines := []domain.Machine{
-		{IP: "10.0.1.11", Name: "lcc1-011"},
-		{IP: "10.0.1.12", Name: "lcc1-012"},
+func TestMachineService_ImportMachines_WithValidCSV_ReturnsSummary(t *testing.T) {
+	ctx, store, _, svc := arrangeMachineImportTest(t)
+	if _, err := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "old-name"}); err != nil {
+		t.Fatalf("failed to seed machine: %v", err)
 	}
+	document := "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n10.0.1.12,lcc1-012,lcc1\n10.0.2.11,lcc2-011,\n"
 
-	if err := svc.SyncMachines(ctx, machines); err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
+	result, err := svc.ImportMachines(ctx, strings.NewReader(document))
 
-	listed, err := store.List(ctx)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	if len(listed) != 2 {
-		t.Errorf("expected 2 machines, got %d", len(listed))
+	expected := schemas.MachineImportOutputSchema{MachinesCreated: 2, MachinesUpdated: 1, GroupsCreated: 1, MachinesLinked: 2}
+	if *result != expected {
+		t.Errorf("expected summary %+v, got %+v", expected, *result)
+	}
+
+	unlinked, _ := store.GetByIP(ctx, "10.0.2.11")
+	if unlinked == nil || unlinked.GroupID != nil {
+		t.Errorf("expected machine with empty lab to stay unlinked, got %+v", unlinked)
 	}
 }
 
-func TestMachineService_SyncMachines_AfterSourceRemoved_PrunesMachine(t *testing.T) {
-	ctx, store, svc, _ := arrangeMachineServiceTest(t)
+func TestMachineService_ImportMachines_WithRelinkedMachines_NotifiesEachMachine(t *testing.T) {
+	ctx, store, notifications, svc := arrangeMachineImportTest(t)
+	store.ImportGroupIDs = map[string]int64{"lcc1": 1}
+	linked, _ := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+	groupID := int64(1)
+	linked.GroupID = &groupID
+	document := "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n10.0.1.12,lcc1-012,lcc1\n10.0.1.13,lcc1-013,lcc2\n"
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
-		{IP: "10.0.1.11", Name: "lcc1-011"},
-		{IP: "10.0.1.12", Name: "lcc1-012"},
-	}); err != nil {
-		t.Fatalf("failed to seed machines: %v", err)
-	}
-
-	if err := svc.SyncMachines(ctx, []domain.Machine{
-		{IP: "10.0.1.11", Name: "lcc1-011"},
-	}); err != nil {
+	if _, err := svc.ImportMachines(ctx, strings.NewReader(document)); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
-	removed, err := store.GetByIP(ctx, "10.0.1.12")
+	if len(*notifications) != 2 {
+		t.Errorf("expected 2 machine notifications, got %v", *notifications)
+	}
+	for _, call := range *notifications {
+		if call != "notify_machine" {
+			t.Errorf("expected only %q calls, got %q", "notify_machine", call)
+		}
+	}
+}
+
+func TestMachineService_ImportMachines_WithPaddedFields_TrimsValues(t *testing.T) {
+	ctx, store, _, svc := arrangeMachineImportTest(t)
+	document := " ip , name , lab \n 10.0.1.11 , lcc1-011 , lcc1 \n"
+
+	if _, err := svc.ImportMachines(ctx, strings.NewReader(document)); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	machine, _ := store.GetByIP(ctx, "10.0.1.11")
+	if machine == nil {
+		t.Fatalf("expected machine %q to be registered", "10.0.1.11")
+	}
+	if machine.Name != "lcc1-011" || machine.GroupName != "lcc1" {
+		t.Errorf("expected trimmed name and lab, got name %q lab %q", machine.Name, machine.GroupName)
+	}
+}
+
+func TestMachineService_ImportMachines_WithInvalidCSV_ReturnsErrInvalidMachinesCSV(t *testing.T) {
+	scenarios := map[string]struct {
+		document string
+	}{
+		"empty document":   {document: ""},
+		"legacy header":    {document: "ip,name\n10.0.1.11,lcc1-011\n"},
+		"wrong header":     {document: "ip,lab,name\n10.0.1.11,lcc1,lcc1-011\n"},
+		"missing field":    {document: "ip,name,lab\n10.0.1.11,lcc1-011\n"},
+		"extra field":      {document: "ip,name,lab\n10.0.1.11,lcc1-011,lcc1,x\n"},
+		"invalid ip":       {document: "ip,name,lab\nnot-an-ip,lcc1-011,lcc1\n"},
+		"empty name":       {document: "ip,name,lab\n10.0.1.11, ,lcc1\n"},
+		"duplicate ip":     {document: "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n10.0.1.11,lcc1-012,lcc1\n"},
+		"malformed quotes": {document: "ip,name,lab\n10.0.1.11,\"lcc1-011,lcc1\n"},
+	}
+
+	for name, scenario := range scenarios {
+		t.Run(name, func(t *testing.T) {
+			ctx, store, _, svc := arrangeMachineImportTest(t)
+
+			result, err := svc.ImportMachines(ctx, strings.NewReader(scenario.document))
+
+			if !errors.Is(err, machineErrors.ErrInvalidMachinesCSV) {
+				t.Errorf("expected ErrInvalidMachinesCSV, got: %v", err)
+			}
+			if result != nil {
+				t.Errorf("expected nil result, got %+v", result)
+			}
+			if listed, _ := store.List(ctx); len(listed) != 0 {
+				t.Errorf("expected no machine to be persisted, got %d", len(listed))
+			}
+		})
+	}
+}
+
+func TestMachineService_ImportMachines_WhenStoreFails_ReturnsError(t *testing.T) {
+	ctx, store, notifications, svc := arrangeMachineImportTest(t)
+	expectedErr := errors.New("failed to import machines")
+	store.StoreErr = expectedErr
+
+	result, err := svc.ImportMachines(ctx, strings.NewReader("ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n"))
+
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected store error, got: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil result, got %+v", result)
+	}
+	if len(*notifications) != 0 {
+		t.Errorf("expected no notifications, got %v", *notifications)
+	}
+}
+
+// ============================================================================
+// RemoveMachine
+// ============================================================================
+
+func TestMachineService_RemoveMachine_WithExistingMachine_RemovesMachine(t *testing.T) {
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
+	machine, _ := store.Upsert(ctx, domain.Machine{IP: "10.0.1.11", Name: "lcc1-011"})
+
+	err := svc.RemoveMachine(ctx, machine.ID)
+
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
+	if removed, _ := store.GetByID(ctx, machine.ID); removed != nil {
+		t.Errorf("expected machine to be removed, got %+v", removed)
+	}
+}
 
-	if removed != nil {
-		t.Errorf("expected pruned machine to be nil, got %+v", removed)
+func TestMachineService_RemoveMachine_WithUnknownMachine_ReturnsErrMachineNotFound(t *testing.T) {
+	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+
+	err := svc.RemoveMachine(ctx, 999)
+
+	if !errors.Is(err, machineErrors.ErrMachineNotFound) {
+		t.Errorf("expected ErrMachineNotFound, got: %v", err)
+	}
+}
+
+func TestMachineService_RemoveMachine_WhenStoreFails_ReturnsError(t *testing.T) {
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
+	expectedErr := errors.New("failed to remove machine")
+	store.StoreErr = expectedErr
+
+	err := svc.RemoveMachine(ctx, 1)
+
+	if !errors.Is(err, expectedErr) {
+		t.Errorf("expected store error, got: %v", err)
 	}
 }
 
@@ -171,7 +280,7 @@ func TestMachineService_InitiateAuthentication_WithEmptyIP_ReturnsIPRequired(t *
 func TestMachineService_Authenticate_WithValidChallenge_ReturnsSession(t *testing.T) {
 	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -224,9 +333,9 @@ func TestMachineService_Authenticate_WithValidChallenge_ReturnsSession(t *testin
 }
 
 func TestMachineService_Authenticate_WithUnknownIP_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -247,9 +356,9 @@ func TestMachineService_Authenticate_WithUnknownIP_ReturnsInvalidCredentials(t *
 }
 
 func TestMachineService_Authenticate_WithUnknownIPAndValidSignature_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -272,9 +381,9 @@ func TestMachineService_Authenticate_WithUnknownIPAndValidSignature_ReturnsInval
 }
 
 func TestMachineService_Authenticate_WithWrongSignature_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -297,9 +406,9 @@ func TestMachineService_Authenticate_WithWrongSignature_ReturnsInvalidCredential
 }
 
 func TestMachineService_Authenticate_WithSignatureForDifferentIP_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -324,9 +433,9 @@ func TestMachineService_Authenticate_WithSignatureForDifferentIP_ReturnsInvalidC
 }
 
 func TestMachineService_Authenticate_WithReplayedNonce_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -357,9 +466,9 @@ func TestMachineService_Authenticate_WithReplayedNonce_ReturnsInvalidCredentials
 }
 
 func TestMachineService_Authenticate_WithExpiredNonce_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, clock := arrangeMachineServiceTest(t)
+	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -383,9 +492,9 @@ func TestMachineService_Authenticate_WithExpiredNonce_ReturnsInvalidCredentials(
 }
 
 func TestMachineService_Authenticate_WithEmptySignature_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -408,9 +517,9 @@ func TestMachineService_Authenticate_WithEmptySignature_ReturnsInvalidCredential
 }
 
 func TestMachineService_Authenticate_WithMalformedSignature_ReturnsInvalidCredentials(t *testing.T) {
-	ctx, _, svc, _ := arrangeMachineServiceTest(t)
+	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -452,7 +561,7 @@ func TestMachineService_Authenticate_WhenStoreFails_ReturnsError(t *testing.T) {
 	ctx, store, svc, _ := arrangeMachineServiceTest(t)
 	expectedErr := errors.New("failed to query database for machines")
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -483,7 +592,7 @@ func TestMachineService_Authenticate_WhenStoreFails_ReturnsError(t *testing.T) {
 func TestMachineService_Heartbeat_ValidToken_TouchesMachineConnected(t *testing.T) {
 	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -524,7 +633,7 @@ func TestMachineService_Heartbeat_ValidToken_TouchesMachineConnected(t *testing.
 func TestMachineService_Heartbeat_InvalidToken_ReturnsInvalidSessionTokenError(t *testing.T) {
 	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -604,7 +713,7 @@ func TestMachineService_ListMachines_MachineNeverSeen_DisplaysDisconnected(t *te
 func TestMachineService_ListMachines_StaleMachine_DisplaysDisconnected(t *testing.T) {
 	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -639,7 +748,7 @@ func TestMachineService_ListMachines_StaleMachine_DisplaysDisconnected(t *testin
 func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T) {
 	ctx, store, svc, clock := arrangeMachineServiceTest(t)
 
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, store, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -674,10 +783,10 @@ func TestMachineService_ListMachines_FreshMachine_DisplaysConnected(t *testing.T
 func TestMachineService_ListMachines_ConfiguredGraceMarksMachineStaleEarlier(t *testing.T) {
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
-	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
+	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), nil, []byte(labSecretKey), "sign-secret", 24*time.Hour, 10*time.Second, clock.Now)
 
 	ctx := context.Background()
-	if err := svc.SyncMachines(ctx, []domain.Machine{
+	if err := seedMachineList(ctx, mockStore, []domain.Machine{
 		{IP: "10.0.1.11", Name: "lcc1-011"},
 	}); err != nil {
 		t.Fatalf("failed to seed machines: %v", err)
@@ -871,9 +980,34 @@ func arrangeMachineServiceTest(t *testing.T) (context.Context, *MockMachineStore
 	mockStore := NewMockMachineStore()
 	clock := newTestClock()
 	ctx := context.Background()
-	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
+	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), nil, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
 
 	return ctx, mockStore, svc, clock
+}
+
+// arrangeMachineImportTest initializes a machine service with a mocked store
+// and a recording propagation notifier, returning the shared notification log.
+func arrangeMachineImportTest(t *testing.T) (context.Context, *MockMachineStore, *[]string, *service.MachineService) {
+	t.Helper()
+
+	mockStore := NewMockMachineStore()
+	notifications := []string{}
+	notifier := &MockPropagationNotifier{Log: &notifications}
+	clock := newTestClock()
+	svc := service.NewMachineService(mockStore, NewMockPropagationStore(), notifier, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
+
+	return context.Background(), mockStore, &notifications, svc
+}
+
+// seedMachineList upserts each provided machine into the mocked store.
+func seedMachineList(ctx context.Context, store *MockMachineStore, machines []domain.Machine) error {
+	for _, machine := range machines {
+		if _, err := store.Upsert(ctx, machine); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // initiateChallenge starts an authentication challenge for the provided IP and
@@ -962,7 +1096,7 @@ func arrangeMachinePropagationTest(t *testing.T) (context.Context, *MockMachineS
 	propStore := NewMockPropagationStore()
 	clock := newTestClock()
 	ctx := context.Background()
-	svc := service.NewMachineService(mockStore, propStore, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
+	svc := service.NewMachineService(mockStore, propStore, nil, []byte(labSecretKey), "sign-secret", 24*time.Hour, 90*time.Second, clock.Now)
 
 	return ctx, mockStore, propStore, svc
 }

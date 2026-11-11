@@ -55,6 +55,37 @@ type Machine struct {
 	GroupName string
 }
 
+// MachineImport declares a single entry of a machine registry import: the
+// machine to register and the name of the laboratory it belongs to.
+type MachineImport struct {
+
+	// Machine holds the IP and name of the machine to register.
+	Machine Machine
+
+	// Lab is the name of the group the machine must be linked to. An empty lab
+	// leaves the current group association of the machine untouched.
+	Lab string
+}
+
+// MachineImportResult summarizes the changes applied by a machine registry
+// import.
+type MachineImportResult struct {
+
+	// MachinesCreated is the number of machines registered by the import.
+	MachinesCreated int
+
+	// MachinesUpdated is the number of already registered machines whose name
+	// was refreshed by the import.
+	MachinesUpdated int
+
+	// GroupsCreated is the number of groups created to match unknown labs.
+	GroupsCreated int
+
+	// RelinkedIDs lists the IDs of the machines whose group association was
+	// changed by the import.
+	RelinkedIDs []int64
+}
+
 // MachineStore declares the required operations that any storage service must
 // implement to manage machine persistence.
 type MachineStore interface {
@@ -85,10 +116,13 @@ type MachineStore interface {
 	// RemoveByIP removes the machine whose IP matches the provided argument.
 	RemoveByIP(ctx context.Context, ip string) error
 
-	// Sync reconciles the stored machines with the provided accepted sources,
-	// upserting each configured machine and pruning any whose IP is no longer
-	// configured, atomically.
-	Sync(ctx context.Context, machines []Machine) error
+	// RemoveByID removes the machine whose ID matches the provided argument.
+	RemoveByID(ctx context.Context, id int64) error
+
+	// Import atomically registers or renames each provided machine, creates a
+	// group for every unknown lab, and links each machine with a non-empty lab
+	// to its group. Machines absent from the entries are kept.
+	Import(ctx context.Context, entries []MachineImport) (*MachineImportResult, error)
 
 	// Touch updates the connection state and last-seen timestamp of the machine
 	// whose ID matches the provided argument. An empty MAC preserves the stored

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,34 +22,8 @@ import (
 // labKey is the 32-byte shared lab key used across the router tests.
 var labKey = []byte("0123456789abcdef0123456789abcdef")
 
-func TestNewRouter_WithValidConfig_RegistersMachineRoutes(t *testing.T) {
-	db, err := sql.Open("sqlite", "file::memory:?mode=memory&cache=shared&_pragma=foreign_keys(ON)")
-	if err != nil {
-		t.Fatalf("failed to open in-memory database: %v", err)
-	}
-
-	t.Cleanup(func() {
-		db.Close()
-	})
-
-	if err := migrations.ApplyMigrations(db); err != nil {
-		t.Fatalf("failed to apply migrations: %v", err)
-	}
-
-	cfg := &config.Config{
-		LabKey:         labKey,
-		SessionSecret:  "sign-secret",
-		SessionTTL:     24 * time.Hour,
-		StalenessGrace: 90 * time.Second,
-		Machines: []config.Machine{
-			{IP: "10.0.1.11", Name: "lcc1-011"},
-		},
-	}
-
-	router, err := api.NewRouter(db, cfg)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
+func TestNewRouter_WithImportedMachines_ListsMachines(t *testing.T) {
+	router := arrangeRouterTest(t)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/machines", nil))
@@ -71,34 +46,8 @@ func TestNewRouter_WithValidConfig_RegistersMachineRoutes(t *testing.T) {
 	}
 }
 
-func TestNewRouter_WithValidConfig_AuthenticatesConfiguredMachine(t *testing.T) {
-	db, err := sql.Open("sqlite", "file::memory:?mode=memory&cache=shared&_pragma=foreign_keys(ON)")
-	if err != nil {
-		t.Fatalf("failed to open in-memory database: %v", err)
-	}
-
-	t.Cleanup(func() {
-		db.Close()
-	})
-
-	if err := migrations.ApplyMigrations(db); err != nil {
-		t.Fatalf("failed to apply migrations: %v", err)
-	}
-
-	cfg := &config.Config{
-		LabKey:         labKey,
-		SessionSecret:  "sign-secret",
-		SessionTTL:     24 * time.Hour,
-		StalenessGrace: 90 * time.Second,
-		Machines: []config.Machine{
-			{IP: "10.0.1.11", Name: "lcc1-011"},
-		},
-	}
-
-	router, err := api.NewRouter(db, cfg)
-	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
-	}
+func TestNewRouter_WithImportedMachine_AuthenticatesMachine(t *testing.T) {
+	router := arrangeRouterTest(t)
 
 	nonce := initiateChallenge(t, router, "10.0.1.11")
 
@@ -157,6 +106,27 @@ func TestNewRouter_WithLinkedMachine_ListsGroupMachines(t *testing.T) {
 	}
 	if listed[0].Propagation.Status != "PENDING" {
 		t.Errorf("expected propagation status %q, got %q", "PENDING", listed[0].Propagation.Status)
+	}
+}
+
+func TestNewRouter_WithLabColumn_LinksImportedMachinesToGroup(t *testing.T) {
+	router := arrangeRouterTest(t)
+
+	if rec := importMachines(router, "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n10.0.1.12,lcc1-012,lcc1\n"); rec.Code != http.StatusOK {
+		t.Fatalf("expected status code %d importing machines, got %d", http.StatusOK, rec.Code)
+	}
+
+	rec := serveJSON(router, http.MethodGet, "/groups/lcc1/machines", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status code %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	var listed []schemas.MachineOutputSchema
+	if err := json.NewDecoder(rec.Body).Decode(&listed); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Errorf("expected 2 machines linked to %q, got %d", "lcc1", len(listed))
 	}
 }
 
@@ -233,7 +203,7 @@ func signChallenge(t *testing.T, ip, nonce string) string {
 }
 
 // arrangeRouterTest builds a router over a migrated in-memory database seeded
-// with the single machine lcc1-011.
+// with the single unlinked machine lcc1-011 through the import route.
 func arrangeRouterTest(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -252,7 +222,6 @@ func arrangeRouterTest(t *testing.T) http.Handler {
 		SessionSecret:  "sign-secret",
 		SessionTTL:     24 * time.Hour,
 		StalenessGrace: 90 * time.Second,
-		Machines:       []config.Machine{{IP: "10.0.1.11", Name: "lcc1-011"}},
 	}
 
 	router, err := api.NewRouter(db, cfg)
@@ -260,7 +229,23 @@ func arrangeRouterTest(t *testing.T) http.Handler {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 
+	if rec := importMachines(router, "ip,name,lab\n10.0.1.11,lcc1-011,\n"); rec.Code != http.StatusOK {
+		t.Fatalf("failed to seed machines: status code %d", rec.Code)
+	}
+
 	return router
+}
+
+// importMachines posts the provided CSV document to the machine import route
+// and returns the recorded response.
+func importMachines(router http.Handler, document string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/machines/import", strings.NewReader(document))
+	req.Header.Set("Content-Type", "text/csv")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	return rec
 }
 
 // serveJSON sends a request with an optional JSON payload to the router and

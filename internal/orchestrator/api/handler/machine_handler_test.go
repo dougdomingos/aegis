@@ -3,7 +3,11 @@ package handler_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +52,95 @@ func TestMachineHandler_ListMachines_WhenServiceFails_ReturnsStatus500(t *testin
 	}
 
 	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines", nil)
+	assertStatusCode(t, rec, http.StatusInternalServerError)
+}
+
+// ============================================================================
+// Import (POST /machines/import)
+// ============================================================================
+
+func TestMachineHandler_Import_WithValidCSV_ReturnsStatus200(t *testing.T) {
+	mock := &mockMachineService{
+		importMachinesFn: func(_ context.Context, _ io.Reader) (*schemas.MachineImportOutputSchema, error) {
+			return &schemas.MachineImportOutputSchema{MachinesCreated: 1, GroupsCreated: 1, MachinesLinked: 1}, nil
+		},
+	}
+
+	rec := performCSVRequest(t, setupMachineRouter(t, mock), "/machines/import", "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n")
+	assertStatusCode(t, rec, http.StatusOK)
+}
+
+func TestMachineHandler_Import_WithInvalidCSV_ReturnsStatus400(t *testing.T) {
+	mock := &mockMachineService{
+		importMachinesFn: func(_ context.Context, _ io.Reader) (*schemas.MachineImportOutputSchema, error) {
+			return nil, machineErrors.ErrInvalidMachinesCSV
+		},
+	}
+
+	rec := performCSVRequest(t, setupMachineRouter(t, mock), "/machines/import", "ip,name\n10.0.1.11,lcc1-011\n")
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestMachineHandler_Import_WithOversizedBody_ReturnsStatus413(t *testing.T) {
+	mock := &mockMachineService{
+		importMachinesFn: func(_ context.Context, document io.Reader) (*schemas.MachineImportOutputSchema, error) {
+			_, err := io.ReadAll(document)
+			return nil, fmt.Errorf("%w: %w", machineErrors.ErrInvalidMachinesCSV, err)
+		},
+	}
+
+	rec := performCSVRequest(t, setupMachineRouter(t, mock), "/machines/import", strings.Repeat("a", 2<<20))
+	assertStatusCode(t, rec, http.StatusRequestEntityTooLarge)
+}
+
+func TestMachineHandler_Import_WhenServiceFails_ReturnsStatus500(t *testing.T) {
+	mock := &mockMachineService{
+		importMachinesFn: func(_ context.Context, _ io.Reader) (*schemas.MachineImportOutputSchema, error) {
+			return nil, errors.New("failed to import machines")
+		},
+	}
+
+	rec := performCSVRequest(t, setupMachineRouter(t, mock), "/machines/import", "ip,name,lab\n10.0.1.11,lcc1-011,lcc1\n")
+	assertStatusCode(t, rec, http.StatusInternalServerError)
+}
+
+// ============================================================================
+// Delete (DELETE /machines/{id})
+// ============================================================================
+
+func TestMachineHandler_Delete_WithExistingMachine_ReturnsStatus204(t *testing.T) {
+	mock := &mockMachineService{
+		removeMachineFn: func(_ context.Context, _ int64) error { return nil },
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodDelete, "/machines/1", nil)
+	assertStatusCode(t, rec, http.StatusNoContent)
+}
+
+func TestMachineHandler_Delete_WithInvalidID_ReturnsStatus400(t *testing.T) {
+	mock := &mockMachineService{
+		removeMachineFn: func(_ context.Context, _ int64) error { return nil },
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodDelete, "/machines/abc", nil)
+	assertStatusCode(t, rec, http.StatusBadRequest)
+}
+
+func TestMachineHandler_Delete_WithMissingMachine_ReturnsStatus404(t *testing.T) {
+	mock := &mockMachineService{
+		removeMachineFn: func(_ context.Context, _ int64) error { return machineErrors.ErrMachineNotFound },
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodDelete, "/machines/999", nil)
+	assertStatusCode(t, rec, http.StatusNotFound)
+}
+
+func TestMachineHandler_Delete_WhenServiceFails_ReturnsStatus500(t *testing.T) {
+	mock := &mockMachineService{
+		removeMachineFn: func(_ context.Context, _ int64) error { return errors.New("failed to remove machine") },
+	}
+
+	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodDelete, "/machines/1", nil)
 	assertStatusCode(t, rec, http.StatusInternalServerError)
 }
 
@@ -272,4 +365,17 @@ func TestMachineHandler_GetPropagationStatus_WhenServiceFails_ReturnsInternalSer
 
 	rec := performRequest(t, setupMachineRouter(t, mock), http.MethodGet, "/machines/7/propagation", nil)
 	assertStatusCode(t, rec, http.StatusInternalServerError)
+}
+
+// performCSVRequest sends a POST with the provided raw CSV body to the endpoint
+// and returns the recorded response.
+func performCSVRequest(t *testing.T, router http.Handler, endpoint, body string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+	req.Header.Set("Content-Type", "text/csv")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	return rec
 }

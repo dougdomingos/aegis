@@ -78,6 +78,17 @@ components:
         policy_name:
           type: string
       type: object
+    schemas.MachineImportOutputSchema:
+      properties:
+        groups_created:
+          type: integer
+        machines_created:
+          type: integer
+        machines_linked:
+          type: integer
+        machines_updated:
+          type: integer
+      type: object
     schemas.MachineOutputSchema:
       properties:
         createdAt:
@@ -558,6 +569,34 @@ paths:
       summary: List machines
       tags:
       - Machines
+  /machines/{id}:
+    delete:
+      operationId: deleteMachine
+      parameters:
+      - description: Machine ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Delete machine
+      tags:
+      - Machines
   /machines/{id}/propagation:
     get:
       operationId: getMachinePropagationStatus
@@ -588,6 +627,42 @@ paths:
                 $ref: '#/components/schemas/utils.ErrorResponse'
           description: Bad Request
       summary: Get machine propagation status
+      tags:
+      - Machines
+  /machines/import:
+    post:
+      operationId: importMachines
+      requestBody:
+        content:
+          text/csv:
+            schema:
+              type: string
+          text/plain:
+            schema:
+              title: body
+              type: string
+        description: CSV
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.MachineImportOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "413":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Import machines
       tags:
       - Machines
   /metrics:
