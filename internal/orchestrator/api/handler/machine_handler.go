@@ -48,6 +48,12 @@ func (handler *MachineHandler) RegisterRoutes(r chi.Router) {
 }
 
 // List handles requests to list the configured machines and their status.
+//
+//	@Summary List machines
+//	@Tags Machines
+//	@ID listMachines
+//	@Success 200 {array} schemas.MachineOutputSchema
+//	@Router /machines [get]
 func (handler *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	machines, err := handler.service.ListMachines(r.Context())
 	if err != nil {
@@ -65,6 +71,14 @@ func (handler *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 // GetPropagationStatus handles requests to read the latest propagation state of a
 // single machine. Machines that never received a message report PENDING with
 // HTTP 200; unknown machines return 404.
+//
+//	@Summary Get machine propagation status
+//	@Tags Machines
+//	@ID getMachinePropagationStatus
+//	@Param id path int true "Machine ID"
+//	@Success 200 {object} schemas.PropagationOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /machines/{id}/propagation [get]
 func (handler *MachineHandler) GetPropagationStatus(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseMachineID(w, r, "id")
 	if !ok {

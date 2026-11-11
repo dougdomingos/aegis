@@ -1,4 +1,4 @@
-.PHONY: init proto tests coverage test-report e2e vm-up vm-test vm-down vm-clean build help
+.PHONY: init proto openapi tests coverage test-report e2e vm-up vm-test vm-down vm-clean build help
 
 # TEST_PACKAGES declares which packages should be executed for tests, keeping
 # untested packages out of the coverage profile.
@@ -30,6 +30,7 @@ init: ## Install utility tools for development lifecycle
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install github.com/dougdomingos/test-prettify@latest
 	go install golang.org/x/tools/cmd/goimports@latest
+	go install github.com/swaggo/swag/v2/cmd/swag@v2.0.0-rc6
 	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	lefthook install
@@ -40,6 +41,11 @@ proto: ## Generate gRPC code from the propagation proto contract
 		--go_out=pkg/pb --go_opt=paths=source_relative \
 		--go-grpc_out=pkg/pb --go-grpc_opt=paths=source_relative \
 		proto/propagation.proto
+
+openapi: ## Generate the Orchestrator OpenAPI spec from handler annotations
+	@swag init --v3.1 -q -g cmd/orchestrator/main.go -d ./ --parseInternal \
+		--outputTypes yaml -o collections/orchestrator
+	@mv collections/orchestrator/swagger.yaml collections/orchestrator/openapi.yml
 
 build: proto ## Build both binaries into ./bin
 	@mkdir -p bin

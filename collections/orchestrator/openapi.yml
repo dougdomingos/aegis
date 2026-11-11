@@ -1,0 +1,971 @@
+components:
+  schemas:
+    domain.PolicyType:
+      enum:
+      - WHITELIST
+      - BLACKLIST
+      type: string
+      x-enum-varnames:
+      - WhitelistPolicyType
+      - BlacklistPolicyType
+    domain.RuleType:
+      enum:
+      - DOMAIN
+      - IP
+      type: string
+      x-enum-varnames:
+      - DomainRuleType
+      - IPRuleType
+    schemas.ChangeGroupNameSchema:
+      properties:
+        newName:
+          type: string
+        targetGroupName:
+          type: string
+      type: object
+    schemas.CreateGroupSchema:
+      properties:
+        name:
+          type: string
+      type: object
+    schemas.CreatePolicySchema:
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/domain.PolicyType'
+      type: object
+    schemas.CreateRuleSchema:
+      properties:
+        port:
+          type: integer
+        protocol:
+          type: string
+        rule_type:
+          $ref: '#/components/schemas/domain.RuleType'
+        value:
+          type: string
+      type: object
+    schemas.GroupOutputSchema:
+      properties:
+        createdAt:
+          type: string
+        id:
+          type: integer
+        machineIDs:
+          items:
+            type: integer
+          type: array
+        name:
+          type: string
+        policyID:
+          description: |-
+            PolicyID is the identifier of the linked policy, or nil when no policy is
+            linked.
+          type: integer
+        policyName:
+          description: PolicyName is the name of the linked policy; empty when none
+            is linked.
+          type: string
+      type: object
+    schemas.LinkMachineToGroupSchema:
+      properties:
+        machine_id:
+          type: integer
+      type: object
+    schemas.LinkPolicyToGroupSchema:
+      properties:
+        policy_name:
+          type: string
+      type: object
+    schemas.MachineOutputSchema:
+      properties:
+        createdAt:
+          type: string
+        groupID:
+          type: integer
+        groupName:
+          type: string
+        id:
+          type: integer
+        ip:
+          type: string
+        lastSeenAt:
+          type: string
+        mac:
+          type: string
+        name:
+          type: string
+        propagation:
+          $ref: '#/components/schemas/schemas.PropagationOutputSchema'
+        status:
+          type: string
+      type: object
+    schemas.PolicyOutputSchema:
+      properties:
+        created_at:
+          type: string
+        id:
+          type: integer
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/domain.PolicyType'
+        updated_at:
+          type: string
+        version:
+          type: integer
+      type: object
+    schemas.PropagationOutputSchema:
+      properties:
+        acked_at:
+          type: string
+        duration_ms:
+          type: integer
+        kind:
+          type: string
+        nack_reason:
+          type: string
+        policy_id:
+          type: integer
+        policy_name:
+          type: string
+        policy_type:
+          type: string
+        policy_version:
+          type: integer
+        sent_at:
+          type: string
+        sequence:
+          type: integer
+        status:
+          type: string
+      type: object
+    schemas.RuleOutputSchema:
+      properties:
+        created_at:
+          type: string
+        id:
+          type: integer
+        policy_id:
+          type: integer
+        port:
+          type: integer
+        protocol:
+          type: string
+        rule_type:
+          $ref: '#/components/schemas/domain.RuleType'
+        value:
+          type: string
+      type: object
+    schemas.UpdatePolicySchema:
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      type: object
+    schemas.UpdateRuleSchema:
+      properties:
+        id:
+          type: integer
+        port:
+          type: integer
+        protocol:
+          type: string
+        value:
+          type: string
+      type: object
+    utils.ErrorResponse:
+      properties:
+        error_code:
+          type: integer
+        message:
+          type: string
+      type: object
+externalDocs:
+  description: ""
+  url: ""
+info:
+  title: Aegis - Orchestrator Admin API
+  version: v0.1.0
+openapi: 3.1.0
+paths:
+  /groups:
+    get:
+      operationId: listGroups
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/schemas.GroupOutputSchema'
+                type: array
+          description: OK
+      summary: List groups
+      tags:
+      - Groups
+    post:
+      operationId: createGroup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.CreateGroupSchema'
+              description: Group
+              summary: body
+        description: Group
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.GroupOutputSchema'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Create group
+      tags:
+      - Groups
+  /groups/{name}:
+    delete:
+      operationId: deleteGroup
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Delete group
+      tags:
+      - Groups
+    get:
+      operationId: getGroupByName
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.GroupOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Get group by name
+      tags:
+      - Groups
+  /groups/{name}/machines:
+    get:
+      operationId: listGroupMachines
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/schemas.MachineOutputSchema'
+                type: array
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: List machines of a group
+      tags:
+      - Groups
+    post:
+      operationId: linkMachineToGroup
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.LinkMachineToGroupSchema'
+              description: Machine
+              summary: body
+        description: Machine
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.MachineOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Link machine to group
+      tags:
+      - Groups
+  /groups/{name}/machines/{machineID}:
+    delete:
+      operationId: unlinkMachineFromGroup
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      - description: Machine ID
+        in: path
+        name: machineID
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.MachineOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Unlink machine from group
+      tags:
+      - Groups
+  /groups/{name}/policy:
+    delete:
+      operationId: unlinkPolicyFromGroup
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.GroupOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Unlink policy from group
+      tags:
+      - Groups
+    post:
+      operationId: linkPolicyToGroup
+      parameters:
+      - description: Group name
+        in: path
+        name: name
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.LinkPolicyToGroupSchema'
+              description: Policy
+              summary: body
+        description: Policy
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.GroupOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Link policy to group
+      tags:
+      - Groups
+  /groups/rename:
+    patch:
+      operationId: renameGroup
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.ChangeGroupNameSchema'
+              description: Names
+              summary: body
+        description: Names
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.GroupOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Rename group
+      tags:
+      - Groups
+  /health:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+          description: OK
+      summary: Liveness probe
+      tags:
+      - Health
+  /machines:
+    get:
+      operationId: listMachines
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/schemas.MachineOutputSchema'
+                type: array
+          description: OK
+      summary: List machines
+      tags:
+      - Machines
+  /machines/{id}/propagation:
+    get:
+      operationId: getMachinePropagationStatus
+      parameters:
+      - description: Machine ID
+        in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.PropagationOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Get machine propagation status
+      tags:
+      - Machines
+  /metrics:
+    get:
+      operationId: getMetrics
+      responses:
+        "200":
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: aegis_propagation_duration_seconds{group} histogram; aegis_propagations_total{group,status}
+            counter
+      summary: Prometheus metrics
+      tags:
+      - Metrics
+  /policies:
+    get:
+      operationId: listPolicies
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/schemas.PolicyOutputSchema'
+                type: array
+          description: OK
+      summary: List policies
+      tags:
+      - Policies
+    post:
+      operationId: createPolicy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.CreatePolicySchema'
+              description: Policy
+              summary: body
+        description: Policy
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.PolicyOutputSchema'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Create policy
+      tags:
+      - Policies
+  /policies/{policyID}:
+    delete:
+      operationId: deletePolicy
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Delete policy
+      tags:
+      - Policies
+    get:
+      operationId: getPolicyById
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.PolicyOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Get policy by ID
+      tags:
+      - Policies
+    patch:
+      operationId: updatePolicy
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.UpdatePolicySchema'
+              description: Policy
+              summary: body
+        description: Policy
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.PolicyOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Update policy
+      tags:
+      - Policies
+  /policies/{policyID}/rules:
+    get:
+      operationId: listRules
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      - description: Rule type
+        in: query
+        name: rule_type
+        schema:
+          enum:
+          - DOMAIN
+          - IP
+          type: string
+      - description: Rule value
+        in: query
+        name: value
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/schemas.RuleOutputSchema'
+                type: array
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: List rules of a policy
+      tags:
+      - Rules
+    post:
+      operationId: createRule
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.CreateRuleSchema'
+              description: Rule
+              summary: body
+        description: Rule
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.RuleOutputSchema'
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Create rule
+      tags:
+      - Rules
+  /policies/{policyID}/rules/{ruleID}:
+    delete:
+      operationId: deleteRule
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      - description: Rule ID
+        in: path
+        name: ruleID
+        required: true
+        schema:
+          type: integer
+      responses:
+        "204":
+          description: No Content
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Delete rule
+      tags:
+      - Rules
+    get:
+      operationId: getRuleById
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      - description: Rule ID
+        in: path
+        name: ruleID
+        required: true
+        schema:
+          type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.RuleOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Get rule by ID
+      tags:
+      - Rules
+    patch:
+      operationId: updateRule
+      parameters:
+      - description: Policy ID
+        in: path
+        name: policyID
+        required: true
+        schema:
+          type: integer
+      - description: Rule ID
+        in: path
+        name: ruleID
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/schemas.UpdateRuleSchema'
+              description: Rule
+              summary: body
+        description: Rule
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/schemas.RuleOutputSchema'
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/utils.ErrorResponse'
+          description: Bad Request
+      summary: Update rule
+      tags:
+      - Rules
+servers:
+- url: http://localhost:8080

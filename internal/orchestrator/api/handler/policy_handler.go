@@ -45,6 +45,14 @@ func (handler *PolicyHandler) RegisterRoutes(r chi.Router) {
 }
 
 // Create registers a new policy within the system.
+//
+//	@Summary Create policy
+//	@Tags Policies
+//	@ID createPolicy
+//	@Param body body schemas.CreatePolicySchema true "Policy"
+//	@Success 201 {object} schemas.PolicyOutputSchema
+//	@Failure 400,409 {object} utils.ErrorResponse
+//	@Router /policies [post]
 func (handler *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var payload schemas.CreatePolicySchema
 	if !utils.DecodePayload(w, r, &payload) {
@@ -67,6 +75,12 @@ func (handler *PolicyHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // List returns every policy registered within the system.
+//
+//	@Summary List policies
+//	@Tags Policies
+//	@ID listPolicies
+//	@Success 200 {array} schemas.PolicyOutputSchema
+//	@Router /policies [get]
 func (handler *PolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 	policies, err := handler.service.ListPolicies(r.Context())
 	if err != nil {
@@ -82,6 +96,14 @@ func (handler *PolicyHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetByID retrieves a policy by its ID.
+//
+//	@Summary Get policy by ID
+//	@Tags Policies
+//	@ID getPolicyById
+//	@Param policyID path int true "Policy ID"
+//	@Success 200 {object} schemas.PolicyOutputSchema
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID} [get]
 func (handler *PolicyHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePolicyID(w, r, "id")
 	if !ok {
@@ -105,6 +127,15 @@ func (handler *PolicyHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // Update applies the provided name change to an existent policy.
+//
+//	@Summary Update policy
+//	@Tags Policies
+//	@ID updatePolicy
+//	@Param policyID path int true "Policy ID"
+//	@Param body body schemas.UpdatePolicySchema true "Policy"
+//	@Success 200 {object} schemas.PolicyOutputSchema
+//	@Failure 400,404,409 {object} utils.ErrorResponse
+//	@Router /policies/{policyID} [patch]
 func (handler *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePolicyID(w, r, "id")
 	if !ok {
@@ -133,6 +164,14 @@ func (handler *PolicyHandler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete removes a policy by its ID.
+//
+//	@Summary Delete policy
+//	@Tags Policies
+//	@ID deletePolicy
+//	@Param policyID path int true "Policy ID"
+//	@Success 204
+//	@Failure 400,404 {object} utils.ErrorResponse
+//	@Router /policies/{policyID} [delete]
 func (handler *PolicyHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, ok := parsePolicyID(w, r, "id")
 	if !ok {
