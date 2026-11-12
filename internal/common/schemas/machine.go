@@ -5,35 +5,35 @@ import "time"
 // InitiateAuthenticationSchema declares the fields sent by a machine to start
 // an authentication challenge.
 type InitiateAuthenticationSchema struct {
-	IP string
+	IP string `json:"ip"`
 }
 
 // InitiateOutputSchema declares the result of starting an authentication
 // challenge.
 type InitiateOutputSchema struct {
-	Nonce     string
-	ExpiresAt time.Time
+	Nonce     string    `json:"nonce"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // AuthenticateMachineSchema declares the fields sent by a machine to complete
 // an authentication challenge.
 type AuthenticateMachineSchema struct {
-	IP        string
-	MAC       string
-	Signature string
+	IP        string `json:"ip"`
+	MAC       string `json:"mac"`
+	Signature string `json:"signature"`
 }
 
 // MachineOutputSchema declares the machine fields displayed to clients.
 type MachineOutputSchema struct {
-	ID          int64
-	Name        string
-	IP          string
-	MAC         string
-	GroupID     *int64
-	GroupName   string
-	Status      string
-	LastSeenAt  *time.Time
-	CreatedAt   time.Time
+	ID          int64                   `json:"id"`
+	Name        string                  `json:"name"`
+	IP          string                  `json:"ip"`
+	MAC         string                  `json:"mac"`
+	GroupID     *int64                  `json:"groupID"`
+	GroupName   string                  `json:"groupName"`
+	Status      string                  `json:"status"`
+	LastSeenAt  *time.Time              `json:"lastSeenAt"`
+	CreatedAt   time.Time               `json:"createdAt"`
 	Propagation PropagationOutputSchema `json:"propagation"`
 }
 
@@ -54,9 +54,9 @@ type PropagationOutputSchema struct {
 
 // AuthenticateOutputSchema declares the result of a successful authentication.
 type AuthenticateOutputSchema struct {
-	SessionToken string
-	ExpiresAt    time.Time
-	Machine      MachineOutputSchema
+	SessionToken string              `json:"sessionToken"`
+	ExpiresAt    time.Time           `json:"expiresAt"`
+	Machine      MachineOutputSchema `json:"machine"`
 }
 
 // MachineImportOutputSchema declares the summary of a machine registry import.
